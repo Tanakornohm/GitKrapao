@@ -5,6 +5,7 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/
 dist/
+tests/ui/.build/
 
 # Local test data and backups
 .mock/
