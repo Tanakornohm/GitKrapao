@@ -1,4 +1,5 @@
 import { Syntax } from './highlight';
+import { invoke, NATIVE } from './ipc';
 
 (() => {
 'use strict';
@@ -21,9 +22,6 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch
 const lsDel = k => { try { localStorage.removeItem(k); } catch (e) {} };
 const lsJSON = (k, d) => { try { return JSON.parse(lsGet(k)) ?? d; } catch (e) { return d; } };
 
-/* Desktop (Tauri) when the bridge exists, otherwise plain browser with manual import. */
-const core = window.__TAURI__ && window.__TAURI__.core;
-const NATIVE = !!core;
 
 const luminance = hex => {   // WCAG relative luminance of #rrggbb
   const n = parseInt(hex.slice(1), 16), ch = v => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
@@ -789,7 +787,7 @@ function requestDetail(c){
   if (detailCache.has(key)) { fillDetail(c, detailCache.get(key)); return; }
   detailTimer = setTimeout(async () => {
     try {
-      const d = await core.invoke('commit_detail', { path: current.path, sha: c.hash });
+      const d = await invoke('commit_detail', { path: current.path, sha: c.hash });
       detailCache.set(key, d);
       if (detailCache.size > DETAIL_CACHE) detailCache.delete(detailCache.keys().next().value);
       if (seq === detailSeq) fillDetail(c, d);
@@ -905,7 +903,7 @@ async function loadDiff(quiet = false){
     const key = kind === 'commit' ? [repo, f.sha, f.oldPath || '', f.path, context].join('\n') : null;
     let r = key && dfCache.get(key);
     if (r) return r;
-    r = await core.invoke('file_diff', { path: repo, kind, sha: f.sha || null, file: f.path, oldFile: f.oldPath || null, context });
+    r = await invoke('file_diff', { path: repo, kind, sha: f.sha || null, file: f.path, oldFile: f.oldPath || null, context });
     if (key) { dfCache.set(key, r); if (dfCache.size > DF_CACHE) dfCache.delete(dfCache.keys().next().value); }
     return r;
   };
@@ -1303,7 +1301,7 @@ async function loadTracking(){
   if (!NATIVE || !current) return;
   const seq = ++trackSeq, path = current.path;
   try {
-    const list = await core.invoke('branch_tracking', { path });
+    const list = await invoke('branch_tracking', { path });
     if (seq !== trackSeq || !current || current.path !== path) return;
     S.track = new Map(list.map(t => [t.name, t]));
     renderSide();
@@ -1498,7 +1496,7 @@ async function loadWip({ force = false } = {}){
   wipBusy = true;
   const seq = ++wipSeq, path = current.path, t0 = performance.now();
   try {
-    const r = await core.invoke('work_status', { path });
+    const r = await invoke('work_status', { path });
     if (seq === wipSeq && current && current.path === path) applyWip(path, r);
   } catch (e) { /* keep the last state; the next poll tries again */ }
   finally {
@@ -1605,7 +1603,7 @@ async function loadStashes(){
   if (!NATIVE || !current) return;
   const seq = ++stashSeq, path = current.path;
   try {
-    const list = await core.invoke('list_stashes', { path });
+    const list = await invoke('list_stashes', { path });
     if (seq !== stashSeq || !current || current.path !== path) return;
     stashes = list.map(st => ({ ...st, card: 'stash', key: 'S:' + st.sha }));
     stashPath = path;
@@ -1753,7 +1751,7 @@ async function loadPrs({ force = false, minAge = PR_EVERY } = {}){
   prs.at = Date.now();
   if (prs.state === 'loading') renderSide();
   try {
-    const r = await core.invoke('pull_requests', { path });
+    const r = await invoke('pull_requests', { path });
     if (seq !== prSeq || prs.path !== path) return;
     prs = { ...prs, state: r.repo ? 'ok' : 'none', repo: r.repo, error: '',
             items: r.items.map(p => ({ ...p, card: 'pr', key: 'PR:' + p.id })) };
@@ -2061,15 +2059,15 @@ async function loadRepo(info, { keep = false, manual = false } = {}){
   try {
     // A refresh reloads as deep as the user had scrolled, so the view stays put.
     const want = keep ? Math.max(PAGE, S.commits.length) : PAGE;
-    const st = await core.invoke('start_history', { path: info.path, hidden, solo });
+    const st = await invoke('start_history', { path: info.path, hidden, solo });
     // Every soloed branch is gone (deleted, renamed): leave solo; the
     // finally block below reloads with the full graph.
     if (solo.length && !st.refs.refs.some(([, n]) => coveredBy(n, solo))) { saveSolo([], info.path); hiddenGen++; }
-    const page = await core.invoke('history_page', { gen: st.gen, start: 0, count: want });
+    const page = await invoke('history_page', { gen: st.gen, start: 0, count: want });
     const { commits, bad } = parseLog(page.log);
     // The ref listing ran alongside the log; if anything moved meanwhile the
     // refs may be newer than the rows, so the next poll reloads in full.
-    const settled = await core.invoke('repo_fingerprint', { path: info.path });
+    const settled = await invoke('repo_fingerprint', { path: info.path });
     current = info; fingerprintSeen = st.fingerprint; streamGen = st.gen; streamPos = commits.length + bad.length;
     $('#emptyState').hidden = true;
     setData(commits, info.name, false, { remotes: st.remotes, refs: st.refs, hidden, solo, keep, ordered: true, more: page.more, capped: page.capped });
@@ -2090,7 +2088,7 @@ async function loadRepo(info, { keep = false, manual = false } = {}){
 
 async function openPath(path, { quiet = false } = {}){
   try {
-    const info = await core.invoke('open_repo', { path });
+    const info = await invoke('open_repo', { path });
     closeMenu();
     await loadRepo(info);
   } catch (e) {
@@ -2103,7 +2101,7 @@ async function openPath(path, { quiet = false } = {}){
 async function pickRepo(){
   closeMenu();
   try {
-    const info = await core.invoke('pick_repo');
+    const info = await invoke('pick_repo', {});
     if (!info) return;
     await loadRepo(info);
   } catch (e) { showError(String(e)); }
@@ -2117,7 +2115,7 @@ async function loadMore(){
   moreBusy = true;
   const gen = streamGen, start = streamPos;
   try {
-    const page = await core.invoke('history_page', { gen, start, count: PAGE });
+    const page = await invoke('history_page', { gen, start, count: PAGE });
     if (gen !== streamGen || start !== streamPos) return 'skip';
     const { commits, bad } = parseLog(page.log);
     streamPos += commits.length + bad.length;
@@ -2152,7 +2150,7 @@ async function syncRepo(){
     busy = true;
     const hg = hiddenGen, hidden = hiddenList(), solo = soloList();
     try {
-      const r = await core.invoke('sync_history', { path: current.path, exclude: [...S.tips], hidden, solo, limit: SYNC_CAP });
+      const r = await invoke('sync_history', { path: current.path, exclude: [...S.tips], hidden, solo, limit: SYNC_CAP });
       if (hg !== hiddenGen) full = 'hidden branches changed';
       else if (r.fingerprintBefore !== r.fingerprintAfter) full = 'repo changed while reading';
       else if (r.over) full = 'too many new commits';
@@ -2177,7 +2175,7 @@ async function syncRepo(){
 async function poll(){
   if (!current || busy || moreBusy || document.hidden) return;
   try {
-    const fp = await core.invoke('repo_fingerprint', { path: current.path });
+    const fp = await invoke('repo_fingerprint', { path: current.path });
     if (fp !== fingerprintSeen) await syncRepo();
     loadPrs();   // returns at once unless PR_EVERY has passed
     loadWip();   // likewise, unless its interval has passed
@@ -2212,7 +2210,7 @@ detail.addEventListener('click', e => {
   const df = e.target.closest('[data-df]'); if (df) { openDiff(+df.dataset.df); return; }
   const j = e.target.closest('[data-jump]'); if (j) { closeDiff(); select(S.idx.get(j.dataset.jump), { scroll: true, open: detail.classList.contains('open') }); return; }
   const cp = e.target.closest('[data-copy]'); if (cp) { copyText(cp.dataset.copy, cp); return; }
-  const ou = e.target.closest('[data-open-url]'); if (ou) { core.invoke('open_url', { url: ou.dataset.openUrl }).catch(err => showError(String(err))); return; }
+  const ou = e.target.closest('[data-open-url]'); if (ou) { invoke('open_url', { url: ou.dataset.openUrl }).catch(err => showError(String(err))); return; }
   if (e.target.closest('.d-close')) detail.classList.remove('open');
 });
 $('#q').addEventListener('input', runSearch);
