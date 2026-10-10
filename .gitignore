@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Rust / Tauri build output (several GB) and generated files
+src-tauri/target/
+src-tauri/gen/
+
+# Local test data and backups
+.mock/
+.backup/
+
+# Secrets: never commit real environment files
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code: personal settings stay local (shared settings.json may be committed)
+.claude/settings.local.json

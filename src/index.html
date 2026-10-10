@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GitKrapao</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <header class="toolbar">
+    <button class="btn icon-btn" id="sideBtn" aria-controls="side" aria-expanded="true" aria-label="Toggle branch panel" title="Toggle branch panel (Ctrl/⌘ B)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg></button>
+    <div class="repo-wrap">
+      <button class="repo repo-btn" id="repoBtn" aria-haspopup="true" aria-expanded="false">
+        <span class="lbl">Repository</span><span class="val" id="repoName">—</span>
+      </button>
+      <div class="menu" id="recentMenu" role="menu" hidden></div>
+    </div>
+    <div class="sep"></div>
+    <div class="repo"><span class="lbl">Branch</span><span class="val" id="headName">—</span></div>
+    <span class="badge" id="sampleBadge" hidden>Sample data</span>
+    <div class="sep s2"></div>
+    <span class="stats" id="stats"></span>
+    <div class="spacer"></div>
+    <label class="search" title="Press / to search">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+      <input id="q" type="search" placeholder="Search message, author, SHA, branch" autocomplete="off" aria-label="Search commits">
+      <span class="count" id="qCount"></span>
+    </label>
+    <button class="btn" id="openBtn" hidden title="Open repository (Ctrl/⌘ O)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 4.5v8h13v-6.5h-7l-1.5-1.5z"/></svg><span class="btn-label">Open repo</span></button>
+    <button class="btn icon-btn" id="refreshBtn" hidden aria-label="Refresh" title="Refresh (Ctrl/⌘ R)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-4"/><path d="M12.5 1.5v3h-3"/></svg></button>
+    <button class="btn" id="importBtn" hidden><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13.5h10"/></svg><span class="btn-label">Import repo</span></button>
+    <button class="btn icon-btn" id="themeBtn" aria-label="Toggle theme" title="Toggle theme"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11a5.5 5.5 0 0 0 0-11z" fill="currentColor"/></svg></button>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden><span id="bannerMsg"></span><button class="btn sm" id="bannerClose">Dismiss</button></div>
+
+  <div class="main">
+    <aside class="side" id="side" aria-label="Branches">
+      <label class="side-filter">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 3.5h12M4.5 8h7M7 12.5h2"/></svg>
+        <input id="bq" type="search" placeholder="Filter branches" autocomplete="off" aria-label="Filter branches">
+      </label>
+      <div class="side-hidden" id="sideHidden" hidden><span id="sideHiddenText"></span><button class="btn sm" id="showAllBtn">Show all</button></div>
+      <div class="side-list" id="sideList" role="tree" aria-label="Branches"></div>
+      <span class="side-resizer" role="separator" aria-orientation="vertical" aria-label="Resize branch panel" tabindex="0" title="Drag to resize, double-click to reset"></span>
+    </aside>
+    <div class="center">
+    <div class="wrap" id="wrap">
+      <div class="grid" id="grid">
+        <div class="head">
+          <div class="col-ref"><span class="h-label">Branch / tag</span><span class="resizer" data-col="ref" role="separator" aria-orientation="vertical" aria-label="Resize Branch / tag column" tabindex="0" title="Drag to resize, double-click to reset"></span></div>
+          <div class="col-graph"><span class="h-label">Graph</span><span class="resizer" data-col="graph" role="separator" aria-orientation="vertical" aria-label="Resize Graph column" tabindex="0" title="Drag to resize, double-click to fit all lanes"></span></div>
+          <div class="col-msg"><span class="h-label">Commit message</span><span class="resizer" data-col="msg" role="separator" aria-orientation="vertical" aria-label="Resize Commit message column" tabindex="0" title="Drag to resize, double-click to fill the space"></span></div>
+          <div class="col-date"><span class="h-label">Date</span><span class="resizer" data-col="date" role="separator" aria-orientation="vertical" aria-label="Resize Date column" tabindex="0" title="Drag to resize, double-click to reset"></span></div>
+        </div>
+        <div class="body" id="body"></div>
+      </div>
+    </div>
+    <section class="diff" id="diff" aria-label="File changes" hidden>
+      <div class="df-bar">
+        <button class="btn sm" id="dfBack" title="Back to the graph (Esc)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 3 5 8l5 5"/></svg>Graph</button>
+        <div class="df-title"><span class="st" id="dfSt"></span><span class="df-path" id="dfPath"></span></div>
+        <span class="df-stat" id="dfStat"></span>
+        <div class="seg" role="group" aria-label="Layout"><button class="btn sm" data-df-view="unified">Unified</button><button class="btn sm" data-df-view="split">Split</button></div>
+        <div class="seg" role="group" aria-label="Context"><button class="btn sm" data-df-ctx="hunks">Changes</button><button class="btn sm" data-df-ctx="full">Full file</button></div>
+        <div class="df-nav"><button class="btn icon-btn sm" id="dfPrev" aria-label="Previous file" title="Previous file (K)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10l5-5 5 5"/></svg></button><span id="dfPos"></span><button class="btn icon-btn sm" id="dfNext" aria-label="Next file" title="Next file (J)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6l5 5 5-5"/></svg></button></div>
+      </div>
+      <div class="df-body" id="dfBody" tabindex="0"></div>
+    </section>
+    </div>
+    <aside class="detail" id="detail" aria-label="Commit details"><div class="empty">Select a commit to see details</div></aside>
+
+    <div class="empty-state" id="emptyState" hidden>
+      <svg width="56" height="56" viewBox="0 0 56 56" fill="none" stroke-width="3" aria-hidden="true"><path d="M14 8v40" stroke="#19bfe6"/><path d="M14 40c0-8 14-8 14-16V8" stroke="#a454f0"/><path d="M42 8v14c0 8-14 8-14 16" stroke="#ff8c32"/><circle cx="14" cy="14" r="5" fill="#19bfe6" stroke="none"/><circle cx="28" cy="18" r="5" fill="#a454f0" stroke="none"/><circle cx="42" cy="12" r="5" fill="#ff8c32" stroke="none"/></svg>
+      <h2>Open a Git repository</h2>
+      <p>Pick any folder inside a repo. The graph refreshes on its own when you commit, fetch or switch branches.</p>
+      <button class="btn primary" id="emptyOpen">Open repository</button>
+      <div class="recent-list" id="emptyRecent"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h3 id="mTitle">Load your own repository</h3>
+    <p>Run this inside your repo, then paste the output below or load the saved file. Nothing leaves your browser.</p>
+    <div class="cmd"><pre class="mono" id="cmd">git log --branches --remotes --tags HEAD --date-order -n 2000 --pretty=format:"%H|~|%P|~|%an|~|%ae|~|%at|~|%D|~|%s" &gt; lanes.txt</pre><button class="btn sm" id="copyCmd">Copy</button></div>
+    <label class="f" for="repoIn">Repository name</label>
+    <input type="text" id="repoIn" placeholder="my-repo">
+    <textarea id="logIn" spellcheck="false" placeholder="Paste the git log output here"></textarea>
+    <div class="m-row">
+      <label class="btn"><input type="file" id="fileIn" accept=".txt,.log,text/plain" hidden>Open file…</label>
+      <span class="err" id="err"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="sampleBtn">Use sample</button>
+      <button class="btn" id="cancelBtn">Cancel</button>
+      <button class="btn primary" id="loadBtn">Load graph</button>
+    </div>
+  </div>
+</div>
+
+<script src="highlight.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

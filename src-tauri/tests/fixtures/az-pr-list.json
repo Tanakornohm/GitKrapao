@@ -1,0 +1,52 @@
+[
+  {
+    "artifactId": "vstfs:///Git/PullRequestId/0000",
+    "autoCompleteSetBy": null,
+    "closedBy": null,
+    "closedDate": null,
+    "codeReviewId": 4521,
+    "commits": null,
+    "completionOptions": null,
+    "completionQueueTime": null,
+    "createdBy": {
+      "displayName": "กมล ใจดี",
+      "id": "00000000-0000-0000-0000-000000000001",
+      "uniqueName": "kamol@example.com"
+    },
+    "creationDate": "2026-10-08T03:15:42.123456+00:00",
+    "description": "แก้ข้อความแจ้งเตือน\n\n- เพิ่ม unit test",
+    "isDraft": false,
+    "lastMergeCommit": { "commitId": "1111111111111111111111111111111111111111", "url": "https://example.invalid/c/1" },
+    "lastMergeSourceCommit": { "commitId": "24a48ded788f7bf05559a8b38a741b8df0db8709", "url": "https://example.invalid/c/2" },
+    "lastMergeTargetCommit": { "commitId": "3333333333333333333333333333333333333333", "url": "https://example.invalid/c/3" },
+    "mergeId": "00000000-0000-0000-0000-00000000000a",
+    "mergeStatus": "succeeded",
+    "pullRequestId": 128,
+    "repository": { "id": "00000000-0000-0000-0000-0000000000r1", "name": "Web App", "project": { "name": "Acme Portal" } },
+    "reviewers": [
+      { "displayName": "Pim Suwan", "id": "r1", "isRequired": true, "vote": 10 },
+      { "displayName": "Alex Rivera", "id": "r2", "vote": -5 },
+      { "displayName": "[Acme Portal]\\Reviewers", "id": "r3", "isContainer": true, "vote": 0 }
+    ],
+    "sourceRefName": "refs/heads/feature/notifications",
+    "status": "active",
+    "supportsIterations": true,
+    "targetRefName": "refs/heads/develop",
+    "title": "ปรับข้อความแจ้งเตือนให้ชัดเจนขึ้น",
+    "url": "https://example.invalid/pr/128"
+  },
+  {
+    "createdBy": { "displayName": "Jordan Lee", "uniqueName": "jordan@example.com" },
+    "creationDate": "2026-10-09T11:00:00+00:00",
+    "description": null,
+    "isDraft": true,
+    "mergeStatus": "conflicts",
+    "pullRequestId": 131,
+    "reviewers": [],
+    "sourceRefName": "refs/heads/feature/reports",
+    "status": "active",
+    "targetRefName": "refs/heads/develop",
+    "title": "WIP: reports export"
+  },
+  { "title": "entry without an id is skipped" }
+]

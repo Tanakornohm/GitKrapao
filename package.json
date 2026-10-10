@@ -1,0 +1,14 @@
+{
+  "name": "lanes",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node scripts/tauri.mjs dev",
+    "build": "node scripts/tauri.mjs build",
+    "tauri": "node scripts/tauri.mjs",
+    "mock": "node scripts/mock-repo.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
