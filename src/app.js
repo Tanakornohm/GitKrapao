@@ -2122,6 +2122,16 @@ document.addEventListener('keydown', e => {
   else if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
 });
 document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.repo-wrap')) closeMenu(); });
+if (NATIVE) {
+  // The webview's own menu (Back, Refresh, Print…) does nothing useful here. Keep it only
+  // in text boxes (paste) and while text is selected (copy).
+  document.addEventListener('contextmenu', e => {
+    const box = e.target.closest('input, textarea');
+    if (box && !/^(checkbox|radio|button|submit|reset|range|color|file)$/.test(box.type)) return;
+    if (String(getSelection()).trim()) return;
+    e.preventDefault();
+  });
+}
 
 /* column resize: drag a header's right edge, double-click it to reset,
    or focus it and use the arrow keys. */
