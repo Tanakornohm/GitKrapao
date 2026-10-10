@@ -57,7 +57,7 @@ A GitKraken-style Git GUI built with Tauri (Rust + plain JS), using pnpm.
 - Panel classes start with `sb-`. Never use class names that collide with the graph's, e.g. `.head` (that once broke the rows).
 
 ### Hiding branches
-- Eye icon on hover, the H key, and "Show all". Saved per repo in localStorage `lanes.hidden` as full ref names or prefixes ending in `/` (a whole folder or remote).
+- Eye icon on hover, the H key, "Show all", and the right-click menu (`#ctxMenu`: Hide/Show + Copy branch name on panel branches, Hide on folders/remotes, Hide + Copy on a graph branch label, which hides every ref in that label). The menu follows the eye button's rules (not the checked-out branch, not during solo). Elsewhere in desktop mode the WebView's own right-click menu is off, except in text boxes and over selected text. Saved per repo in localStorage `lanes.hidden` as full ref names or prefixes ending in `/` (a whole folder or remote).
 - The backend turns them into `git log --exclude=<name> --branches --exclude=<name> --remotes --tags HEAD` (`rev_args`). `--exclude` takes names without refs/heads/, applies only to the next --branches/--remotes, and its `*` also matches `/`. Commits that a visible ref still reaches stay in the graph. The checked-out branch cannot be hidden.
 - Labels and sync tips come from `visibleRefs(refs, hidden)`; the panel uses all of `S.refs`. Hiding/showing does a full reload (`hiddenGen` makes a load/sync that ran with the old list reload again). Test by comparing commit count and order with `git log` using the same `--exclude` set.
 - Browser mode rebuilds a ref snapshot from `%D` (`refsFromDec`) and filters commits itself in `showBrowser`. Never overwrite `c.dec` (that once made hidden refs vanish from the panel).
