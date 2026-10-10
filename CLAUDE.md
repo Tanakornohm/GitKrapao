@@ -1,6 +1,6 @@
 # GitKrapao
 
-A GitKraken-style Git GUI built with Tauri (Rust + plain JS), using pnpm.
+A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 
 ## Name
 - The app is called **GitKrapao** (a pun on GitKraken and กะเพรา): `productName`, `mainBinaryName`, the window title, the page title and user-facing messages.
@@ -10,14 +10,15 @@ A GitKraken-style Git GUI built with Tauri (Rust + plain JS), using pnpm.
 - The feature that must be best-in-class is the history graph of commits, branches and merges: as beautiful and easy to read as GitKraken's.
 - When designing or making UI decisions, weigh graph clarity (lanes, branches, merges) first.
 
-## Graph rendering (src/app.js)
+## Graph rendering (src/app.ts)
 - Virtualized: the DOM holds only rows near the viewport (`pool`), and the graph is drawn on a viewport-sized `<canvas>`. Never go back to building DOM/SVG for every row.
 - Edges are indexed in tiles of 256 rows (`buildTiles`). Per-row state (sel, dim) must be computed from the row index, not from DOM nodes.
 - Layout is append-only (`layoutRows`): rows already placed never move when a new page arrives; an edge whose parent is not loaded yet waits in `open`. Any layout change must give identical values whether the history is loaded at once or page by page. (Stash rows are the one exception; see below.)
 - Desktop mode uses the order from `git log --date-order` as is (narrower graph than `topoOrder`); `topoOrder` is only for logs pasted in browser mode.
 - Every row ↔ pixel conversion goes through `rowOff` (ROW_H while the WIP row shows, else 0): `makeRow`, the canvas top, the `draw()` range, `placeRows` (body height, `moreRow`), `ensureVisible`, `jumpTo` centering, and both sides of `scrollAnchor`/`anchoredTop`. When the WIP row appears or goes away, `placeRows` shifts scrollTop so the same commits stay on screen.
 - Lane colors come from the CSS token `--lanes` (one list per theme; the light theme uses darker shades so lines reach 3:1 on a white page). `readTheme` loads it into `PALETTE`/`ON_COL`; `applyTheme` rebuilds rows, panel and card when it changes. Text on a colored fill (node initials, checked-out label, avatars) always goes through `textOn`, which picks dark or white by WCAG contrast.
-- `ROW_H` in app.js must equal `--rowh` in app.css.
+- `ROW_H` in app.ts must equal `--rowh` in app.css.
+- A row shows its first label plus "+N". Hovering the Branch / tag cell (120 ms) opens `.ref-pop` over the rows below with every label, the first one in place; it closes on leave, scroll, `render` and theme change. Graph labels carry `data-g` (index in `c.groups`) so the branch menu acts on the label that was clicked.
 - Canvas pixels are not bit-exact even when the same data is redrawn, so never compare layouts by pixels; compare rows (lane, color) and edges.
 
 ## WIP row (work_status)
@@ -74,7 +75,7 @@ A GitKraken-style Git GUI built with Tauri (Rust + plain JS), using pnpm.
 - The fingerprint includes `logs/refs/stash` because `git stash drop` does not touch `refs/stash`.
 - PRs come from Azure DevOps through `az repos pr list` with the account signed in via `az login` (the app stores no token). origin is used first (`parse_azure_remote` handles dev.azure.com, visualstudio.com and SSH URLs). They are fetched again every 5 minutes, after a sync if older than 30 seconds, and on every Refresh. az errors are read from stdout and stderr together (az writes its questions to stdout).
 - `open_url` only opens https links on dev.azure.com / *.visualstudio.com.
-- The PR UI cannot be tested in the real WebView by replacing invoke (`__TAURI__` is frozen and non-configurable). Use headless Edge with a fake `__TAURI__` loaded before app.js. Test real az calls with an empty `AZURE_CONFIG_DIR` so the user's account is never used.
+- The PR UI cannot be tested in the real WebView by replacing invoke (`__TAURI__` is frozen and non-configurable). Use headless Edge with a fake `__TAURI__` loaded before app.js (as `tests/ui/webview-menu.suite.mjs` does). Test real az calls with an empty `AZURE_CONFIG_DIR` so the user's account is never used.
 
 ## File diff view (file_diff)
 - Clicking a file in a commit, stash or WIP card shows its diff over the graph (`.diff` inside `.center`); `#wrap` stays mounted underneath so its scroll and virtualization survive. Unified or split, changes only or full file (`lanes.diff`), J/K (or ]/[) between files, Esc back. While it is open the graph keys are off; a branch/stash/PR click, a hash link and switching repos close it.
@@ -85,7 +86,7 @@ A GitKraken-style Git GUI built with Tauri (Rust + plain JS), using pnpm.
 - Commit and stash diffs are cached (100); work tree diffs are not. While a work tree diff is open, every WIP poll re-reads it with `loadDiff(true)` (quiet: no "Loading…", errors keep what is shown, redrawn with the scroll kept only when the patch changed), because editing an already modified file does not change git status or the WIP signature. A poll never cancels a load in flight (`dfBusy`), or a slow file would keep restarting. `panelFiles` is what the card lists now; `dfKey` re-finds the open file after the card is redrawn (`markDiffRow`).
 - Tests: `file_diffs_against_real_git` (cargo) and comparing the app's +/− line counts with `git --numstat` for commit, stash and WIP files.
 
-### Syntax colors (src/highlight.js)
+### Syntax colors (src/highlight.ts)
 - Our own small lexers (no third-party code; the CSP stays `script-src 'self'`). The language comes from the file name (`Syntax.lang`; the old side of a rename uses `oldPath`); unknown types stay plain. Families: JS/TS, JSON, C#, Java/Kotlin, Go, Rust, C/C++, Python, Ruby, PHP, shell, PowerShell, SQL, CSS/SCSS, HTML/XML (csproj, xaml, svg…), YAML, INI/TOML/.env, Markdown, Dockerfile.
 - Lexers return `[start, end, class]` ranges in UTF-16 offsets, never HTML. `codeHtml` escapes every piece and only emits classes in `Syntax.CLASSES` (as `sx-*`). Word marks count code points; `unitAt` converts them so an emoji before a change does not shift the mark. Pieces are split at both token and mark edges so tags never cross.
 - Lexing runs per side: one lexer over the old side (context + removed lines) and one over the new side (context + added lines), with state carried line to line (block comments, multi-line strings, open tags). Unified context lines use the new side; split view's left column uses the old side. Never lex removed and added lines as one stream: a removed line that opens a comment would color the added lines.
@@ -100,12 +101,21 @@ A GitKraken-style Git GUI built with Tauri (Rust + plain JS), using pnpm.
 
 ## Test data
 - Never test with the user's real work repos. Use `pnpm run mock`, which builds `.mock/demo-repo` with `git fast-import`, identical on every run: 158 commits, main/develop/feature/release/hotfix, tags, a remote with upstreams that are ahead, 2 stashes (one with untracked files), and Thai messages. The script only deletes and rebuilds a folder that has the marker `.git/lanes-mock`.
-- Browser mode (opening `src/index.html` directly) uses built-in sample data and needs no git.
+- Browser mode (`pnpm run web:build`, then open `dist/index.html`) uses built-in sample data and needs no git.
+- UI tests: `pnpm run test:ui` (headless Edge, a fresh profile per suite) runs `tests/ui/*.suite.mjs` against a test bundle; suites marked `prodSafe` (those that do not read `window.__lanes`) also run against the minified production bundle. `capture.js` is injected before the suite's setup and app.js, so an error or unhandled rejection while the page boots fails the suite. `layout.suite.mjs` compares every row (hash, lane, color) and edge of the sample and of `tests/ui/fixtures/mock-log.txt` with `fixtures/layout-baseline.json`; refresh the baseline (`-- --write-baseline`) only for an intended layout change.
 
 ## Commands
-- `pnpm run dev` runs `tauri dev` through `scripts/tauri.mjs` (the first Rust compile is slow; later builds are cached in `src-tauri/target`).
+- `pnpm run dev` runs `tauri dev` through `scripts/tauri.mjs` (the first Rust compile is slow; later builds are cached in `src-tauri/target`). Tauri starts `pnpm run web:watch` first, which builds `dist/` once before watching.
 - `pnpm run mock` rebuilds the mock repo at `.mock/demo-repo`.
+- `pnpm run web:build` bundles the UI into `dist/` (`scripts/web.mjs`; `--test` exposes `window.__lanes` for tests/ui, real builds drop it).
+- `pnpm run typecheck` (`tsc --noEmit`), `pnpm run test:ui`, `pnpm run check:bindings` (see TypeScript below), `cd src-tauri && cargo test --lib`.
 - Keep using pnpm; do not switch to bun (the bottleneck is Rust, not the package manager).
+
+## TypeScript
+- The UI is TypeScript (`src/app.ts`, `highlight.ts`, `ipc.ts`, `types.ts`). esbuild bundles it into one IIFE at `dist/app.js` and does not check types; `tsc` only checks (`noEmit`). Run `pnpm run typecheck` before calling a change done.
+- `strict` + `noUncheckedIndexedAccess`. No `@ts-ignore` / `@ts-expect-error`; no `any` except at a parse boundary, with a comment. A `!` or `as` needs the reason it holds (a length check, `has()` before `get()`, an element in index.html), written next to it when it is not obvious.
+- Data from Rust is typed by `src/bindings/*.ts`, generated by ts-rs (a dev-dependency only; `#[cfg_attr(test, derive(ts_rs::TS), ts(export))]` on each struct sent to the UI, `u64`/`i64` fields marked `ts(type = "number")`). Changing such a struct: `cargo test --lib` regenerates the bindings, commit them; `pnpm run check:bindings` fails on a forgotten one. `.gitattributes` keeps `src/bindings` LF so regenerating is a no-op on Windows.
+- Every Rust command is called through `invoke` in `src/ipc.ts`; its argument types live in the `Commands` map there.
 
 ## Environment (Windows)
 - Requires Rust (cargo) and the Visual Studio 2026 workload "Desktop development with C++" + Windows SDK.

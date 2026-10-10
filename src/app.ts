@@ -1,3 +1,19 @@
+import { Syntax } from './highlight';
+import type { Token } from './highlight';
+import type { CommitDetail } from './bindings/CommitDetail';
+import type { FileChange } from './bindings/FileChange';
+import type { FileDiff } from './bindings/FileDiff';
+import type { DiffKind } from './ipc';
+import { invoke, NATIVE } from './ipc';
+import type { AppState, Card, Commit, Edge, Layout, RawCommit, RefGroup, Shown } from './types';
+import type { Refs } from './bindings/Refs';
+import type { RepoInfo } from './bindings/RepoInfo';
+import type { Stash } from './bindings/Stash';
+import type { PullRequest } from './bindings/PullRequest';
+import type { Track } from './bindings/Track';
+import type { WorkFile } from './bindings/WorkFile';
+import type { WorkStatus } from './bindings/WorkStatus';
+
 (() => {
 'use strict';
 const ROW_H = 38, LANE_W = 30, PAD = 16, R = 11, DOT = 5.5;   // ROW_H = --rowh in app.css
@@ -9,38 +25,38 @@ const NODE_FONT = "600 9px system-ui,-apple-system,'Segoe UI','Noto Sans Thai','
 // Lane colors; each theme sets its own in the CSS token --lanes (readTheme).
 // The light theme uses darker shades so lines stand out from a white page.
 let PALETTE = ['#17abd4','#3f7cf6','#a454f0','#e341c3','#ff4d6a','#ff8c32','#f2c230','#62cc4a','#25cfa4'];
-const laneCol = i => PALETTE[i % PALETTE.length];
-const lx = l => PAD + R + l * LANE_W;
-const ry = r => r * ROW_H + ROW_H / 2;
-const $ = s => document.querySelector(s);
-const esc = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
-const lsDel = k => { try { localStorage.removeItem(k); } catch (e) {} };
-const lsJSON = (k, d) => { try { return JSON.parse(lsGet(k)) ?? d; } catch (e) { return d; } };
+const laneCol = (i: number) => PALETTE[i % PALETTE.length]!;
+const lx = (l: number) => PAD + R + l * LANE_W;
+const ry = (r: number) => r * ROW_H + ROW_H / 2;
+// Only used for elements that are in index.html.
+const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
+const ESC: Record<string, string> = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const esc = (s: unknown) => String(s).replace(/[&<>"']/g, ch => ESC[ch]!);
+const lsGet = (k: string) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
+const lsDel = (k: string) => { try { localStorage.removeItem(k); } catch (e) {} };
+// JSON.parse(null) is null, so a missing key falls back to d like a broken value does.
+const lsJSON = <T>(k: string, d: T): T => { try { return JSON.parse(lsGet(k)!) ?? d; } catch (e) { return d; } };
 
-/* Desktop (Tauri) when the bridge exists, otherwise plain browser with manual import. */
-const core = window.__TAURI__ && window.__TAURI__.core;
-const NATIVE = !!core;
 
-const luminance = hex => {   // WCAG relative luminance of #rrggbb
-  const n = parseInt(hex.slice(1), 16), ch = v => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+const luminance = (hex: string) => {   // WCAG relative luminance of #rrggbb
+  const n = parseInt(hex.slice(1), 16), ch = (v: number) => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   return 0.2126 * ch((n >> 16) & 255) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255);
 };
 // Dark or white text, whichever contrasts more with the fill.
-function textOn(hex){
+function textOn(hex: string){
   const l = luminance(hex) + 0.05;
   return l / (luminance('#15181d') + 0.05) >= 1.05 / l ? '#15181d' : '#ffffff';
 }
-function initials(name){
+function initials(name: string){
   const p = String(name || '').trim().split(/\s+/).filter(Boolean);
   if (!p.length) return '?';
-  const a = [...p[0]];
-  if (p.length === 1) return (a[0] + (a[1] || '')).toUpperCase();
-  return (a[0] + [...p[p.length-1]][0]).toUpperCase();
+  const a = [...p[0]!];
+  if (p.length === 1) return (a[0]! + (a[1] || '')).toUpperCase();
+  return (a[0]! + [...p[p.length-1]!][0]).toUpperCase();
 }
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
-function rel(t){
+function rel(t: number){
   const d = t - Date.now()/1000, a = Math.abs(d);
   if (a < 60) return 'just now';
   if (a < 3600) return rtf.format(Math.round(d/60), 'minute');
@@ -48,9 +64,9 @@ function rel(t){
   if (a < 86400*30) return rtf.format(Math.round(d/86400), 'day');
   return new Date(t*1000).toLocaleDateString('en', { year:'numeric', month:'short', day:'numeric' });
 }
-const pad2 = n => String(n).padStart(2, '0');
+const pad2 = (n: number) => String(n).padStart(2, '0');
 // yyyy-MM-dd HH:mm:ss, local time
-function absDate(t){
+function absDate(t: number){
   const d = new Date(t*1000);
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
@@ -76,18 +92,20 @@ function buildSample(){
     ['Nattaya Kongsri','nattaya@example.com'], ['Somchai Prasert','somchai@example.com'],
     ['Alex Rivera','alex@example.com'], ['Pim Suwan','pim@example.com'], ['Jordan Lee','jordan@example.com']
   ];
-  const list = [], heads = {}, deco = {}; let t = 0;
+  // heads[b] is set by commit()/branch() before any later call reads it.
+  // Commits get their row fields from prepCommit/layoutRows once loaded.
+  const list: Commit[] = [], heads: Record<string, string> = {}, deco: Record<string, string[]> = {}; let t = 0;
   const hex = () => { let s = ''; for (let i = 0; i < 40; i++) s += '0123456789abcdef'[Math.floor(rand()*16)]; return s; };
-  const mk = (parents, subject, who) => { t += 1 + Math.floor(rand()*4); const c = { hash: hex(), parents, author: people[who][0], email: people[who][1], time: t, subject, dec: '' }; list.push(c); return c.hash; };
-  const commit = (b, s, w) => { heads[b] = mk(heads[b] ? [heads[b]] : [], s, w); };
-  const branch = (nb, from) => { heads[nb] = heads[from]; };
-  const merge = (into, from, s, w) => { heads[into] = mk([heads[into], heads[from]], s || `Merge branch '${from}' into ${into}`, w); };
-  const mark = (hash, ref) => { (deco[hash] = deco[hash] || []).push(ref); };
+  const mk = (parents: string[], subject: string, who: number) => { t += 1 + Math.floor(rand()*4); const c = { hash: hex(), parents, author: people[who]![0]!, email: people[who]![1]!, time: t, subject, dec: '' } as Commit; list.push(c); return c.hash; };
+  const commit = (b: string, s: string, w: number) => { const h = heads[b]; heads[b] = mk(h ? [h] : [], s, w); };
+  const branch = (nb: string, from: string) => { heads[nb] = heads[from]!; };
+  const merge = (into: string, from: string, s: string | null, w: number) => { heads[into] = mk([heads[into]!, heads[from]!], s || `Merge branch '${from}' into ${into}`, w); };
+  const mark = (hash: string, ref: string) => { (deco[hash] = deco[hash] || []).push(ref); };
 
   commit('main','Initial commit',1);
   commit('main','Add project scaffolding and README',1);
   commit('main','Set up CI pipeline',4);
-  mark(heads.main,'tag: v0.1.0');
+  mark(heads.main!,'tag: v0.1.0');
   branch('develop','main');
   commit('develop','Add client-side router',0);
   branch('feature/auth','develop');
@@ -101,7 +119,7 @@ function buildSample(){
   commit('hotfix/login-crash','Fix crash when session cookie is missing',1);
   commit('feature/auth','Add auth unit tests',2);
   merge('main','hotfix/login-crash',null,1);
-  mark(heads.main,'tag: v0.1.1');
+  mark(heads.main!,'tag: v0.1.1');
   merge('develop','feature/auth','Merge pull request #12 from feature/auth',0);
   commit('feature/dashboard','Refactor chart widgets into hooks',3);
   merge('develop','main',null,0);
@@ -112,7 +130,7 @@ function buildSample(){
   commit('develop','Start notifications module',0);
   commit('release/0.2','Update CHANGELOG for 0.2.0',4);
   merge('main','release/0.2',null,4);
-  mark(heads.main,'tag: v0.2.0');
+  mark(heads.main!,'tag: v0.2.0');
   merge('develop','release/0.2',null,4);
   branch('feature/notifications','develop');
   branch('feature/dark-mode','develop');
@@ -120,17 +138,17 @@ function buildSample(){
   commit('feature/dark-mode','Introduce theme tokens',3);
   commit('develop','Update dependencies',0);
   commit('feature/notifications','Subscribe to websocket events',2);
-  const originNotif = heads['feature/notifications'];
+  const originNotif = heads['feature/notifications']!;
   commit('feature/dark-mode','Add theme toggle to header',3);
-  const originDevelop = heads.develop;
+  const originDevelop = heads.develop!;
   commit('develop','Fix flaky date formatting test',0);
   commit('feature/notifications','WIP: unread badge in nav bar',2);
 
-  mark(heads.main,'main'); mark(heads.main,'origin/main');
-  mark(heads.develop,'HEAD -> develop'); mark(originDevelop,'origin/develop');
-  mark(heads['feature/notifications'],'feature/notifications'); mark(originNotif,'origin/feature/notifications');
-  mark(heads['feature/dark-mode'],'feature/dark-mode'); mark(heads['feature/dark-mode'],'origin/feature/dark-mode');
-  mark(list[0].hash,'origin/HEAD');
+  mark(heads.main!,'main'); mark(heads.main!,'origin/main');
+  mark(heads.develop!,'HEAD -> develop'); mark(originDevelop,'origin/develop');
+  mark(heads['feature/notifications']!,'feature/notifications'); mark(originNotif,'origin/feature/notifications');
+  mark(heads['feature/dark-mode']!,'feature/dark-mode'); mark(heads['feature/dark-mode']!,'origin/feature/dark-mode');
+  mark(list[0]!.hash,'origin/HEAD');
 
   const now = Date.now()/1000, last = t;
   list.forEach(c => { c.time = Math.round(now - 1500 - (last - c.time) * 3600 * 1.6); c.dec = (deco[c.hash] || []).join(', '); });
@@ -140,60 +158,62 @@ function buildSample(){
 /* ---------- parsing ----------
    Desktop output uses 0x1f between fields and 0x1e after each commit.
    Pasted output (browser mode) uses "|~|" and one commit per line. */
-function parseLog(text){
+function parseLog(text: string){
   const native = text.includes('\x1f');
   const FS = native ? '\x1f' : '|~|';
   const records = native ? text.split('\x1e') : text.split(/\r?\n/);
-  const out = [], bad = [];
+  const out: Commit[] = [], bad: number[] = [];
   records.forEach((rec, i) => {
     const line = rec.replace(/^[\r\n]+/, '');
     if (!line.trim()) return;
     const f = line.split(FS);
     // Desktop records carry the committer time before the (empty) decoration.
     if (f.length < (native ? 8 : 7)) { bad.push(i+1); return; }
-    const [hash, parents, an, ae, at, ...more] = f;
+    // The length check above guarantees the first five fields.
+    const [hash, parents, an, ae, at, ...more] = f as [string, string, string, string, string, ...string[]];
     const [ct, dec, ...rest] = native ? more : [at, ...more];
     const h = hash.trim().replace(/^["']/, '');
     if (!/^[0-9a-f]{7,64}$/i.test(h)) { bad.push(i+1); return; }
     let subject = rest.join(FS);
     if (!native) subject = subject.replace(/["']$/, '');
-    out.push({ hash: h, parents: parents.trim() ? parents.trim().split(/\s+/) : [], author: an, email: ae, time: +at || 0, ctime: +ct || +at || 0, dec: dec || '', subject: subject.replace(/[\r\n]+$/, '') });
+    // Row fields are added by prepCommit/layoutRows once the commit is loaded.
+    out.push({ hash: h, parents: parents.trim() ? parents.trim().split(/\s+/) : [], author: an, email: ae, time: +at || 0, ctime: +ct! || +at || 0, dec: dec || '', subject: subject.replace(/[\r\n]+$/, '') } as Commit);
   });
   return { commits: out, bad };
 }
 
-function groupRefs(dec, remotes){
-  const map = new Map(), tags = []; let detached = false;
+function groupRefs(dec: string, remotes: Set<string>): RefGroup[]{
+  const map = new Map<string, RefGroup>(), tags: RefGroup[] = []; let detached = false;
   dec.split(',').map(s => s.trim()).filter(Boolean).forEach(r => {
     if (r === 'HEAD') { detached = true; return; }
     let head = false;
     if (r.startsWith('HEAD -> ')) { head = true; r = r.slice(8); }
     if (r.startsWith('tag: ')) { tags.push({ kind:'tag', name: r.slice(5), local:false, remotes:[], head:false }); return; }
-    const s = r.indexOf('/'); let remote = null, name = r;
+    const s = r.indexOf('/'); let remote: string | null = null, name = r;
     if (s > 0 && remotes.has(r.slice(0, s))) { remote = r.slice(0, s); name = r.slice(s+1); if (name === 'HEAD') return; }
-    const g = map.get(name) || { kind:'branch', name, local:false, remotes:[], head:false };
+    const g: RefGroup = map.get(name) || { kind:'branch', name, local:false, remotes:[], head:false };
     if (remote) g.remotes.push(remote); else g.local = true;
     if (head) g.head = true;
     map.set(name, g);
   });
-  const list = [...map.values()].sort((a,b) => (b.head - a.head) || (b.local - a.local) || a.name.localeCompare(b.name));
+  const list = [...map.values()].sort((a,b) => (+b.head - +a.head) || (+b.local - +a.local) || a.name.localeCompare(b.name));
   if (detached && !list.some(g => g.head)) list.unshift({ kind:'branch', name:'HEAD (detached)', local:true, remotes:[], head:true });
   return list.concat(tags);
 }
 
-function topoOrder(list){
-  const map = new Map(); list.forEach(c => { if (!map.has(c.hash)) map.set(c.hash, c); });
+function topoOrder<T extends RawCommit>(list: T[]): T[]{
+  const map = new Map<string, T>(); list.forEach(c => { if (!map.has(c.hash)) map.set(c.hash, c); });
   const uniq = [...map.values()];
   const kids = new Map(uniq.map(c => [c.hash, 0]));
-  uniq.forEach(c => c.parents.forEach(p => { if (kids.has(p)) kids.set(p, kids.get(p) + 1); }));
+  uniq.forEach(c => c.parents.forEach(p => { if (kids.has(p)) kids.set(p, kids.get(p)! + 1); }));
   const ready = uniq.filter(c => kids.get(c.hash) === 0).sort((a,b) => a.time - b.time);
-  const out = [], seen = new Set();
+  const out: T[] = [], seen = new Set<string>();
   while (ready.length) {
-    const c = ready.pop(); out.push(c); seen.add(c.hash);
+    const c = ready.pop()!; out.push(c); seen.add(c.hash);
     c.parents.forEach(p => {
       if (!kids.has(p)) return;
-      const k = kids.get(p) - 1; kids.set(p, k);
-      if (k === 0) { const pc = map.get(p); let lo = 0, hi = ready.length; while (lo < hi) { const m = (lo+hi) >> 1; if (ready[m].time < pc.time) lo = m + 1; else hi = m; } ready.splice(lo, 0, pc); }
+      const k = kids.get(p)! - 1; kids.set(p, k);
+      if (k === 0) { const pc = map.get(p)!; let lo = 0, hi = ready.length; while (lo < hi) { const m = (lo+hi) >> 1; if (ready[m]!.time < pc.time) lo = m + 1; else hi = m; } ready.splice(lo, 0, pc); }
     });
   }
   if (out.length < uniq.length) uniq.forEach(c => { if (!seen.has(c.hash)) out.push(c); });
@@ -205,27 +225,28 @@ function topoOrder(list){
    row already placed. An edge whose parent is not loaded yet stays open
    (to = -1, drawn to the bottom) until that parent's row is laid out.
    idx must already map every hash in `commits`, including the new rows. */
-function newLayout(){ return { lanes: [], laneColor: [], seq: 0, maxLane: 0, open: new Map() }; }
-function layoutRows(st, commits, start, idx, edges){
+function newLayout(): Layout { return { lanes: [], laneColor: [], seq: 0, maxLane: 0, open: new Map() }; }
+// laneColor[L] is set whenever lane L is taken, so reading it for a taken lane is safe.
+function layoutRows(st: Layout, commits: Commit[], start: number, idx: Map<string, number>, edges: Edge[]){
   const { lanes, laneColor } = st;
   const free = () => { let i = lanes.indexOf(null); if (i < 0) { i = lanes.length; lanes.push(null); } return i; };
-  const link = (e, row) => { const p = commits[row]; e.to = row; e.toLane = p.lane; p.children.push(e.from); };
+  const link = (e: Edge, row: number) => { const p = commits[row]!; e.to = row; e.toLane = p.lane; p.children.push(e.from); };
   for (let row = start; row < commits.length; row++) {
-    const c = commits[row];
+    const c = commits[row]!;
     if (c.stashRow) { c.row = row; c.children = []; continue; }   // placed afterwards by laneStashes
     let L = -1;
     for (let i = 0; i < lanes.length; i++) if (lanes[i] === c.hash) { if (L < 0) L = i; else lanes[i] = null; }
     if (L < 0) { L = free(); laneColor[L] = st.seq++; }
-    c.row = row; c.lane = L; c.color = laneColor[L]; c.children = [];
+    c.row = row; c.lane = L; c.color = laneColor[L]!; c.children = [];
     lanes[L] = null;
     const waiting = st.open.get(c.hash);
     if (waiting) { st.open.delete(c.hash); waiting.forEach(e => link(e, row)); }
     c.parents.forEach((p, k) => {
-      let T;
+      let T: number;
       if (k === 0) T = L;
       else { T = lanes.indexOf(p); if (T < 0) { T = free(); laneColor[T] = st.seq++; } }
       lanes[T] = p;
-      const e = { from: row, fromLane: L, lane: T, to: -1, toLane: T, color: laneColor[T] };
+      const e: Edge = { from: row, fromLane: L, lane: T, to: -1, toLane: T, color: laneColor[T]! };
       edges.push(e);
       const at = idx.get(p);
       if (at !== undefined && at < row) link(e, at);   // parent listed above its child (malformed input)
@@ -240,8 +261,8 @@ function layoutRows(st, commits, start, idx, edges){
 /* ---------- refs & incremental sync (desktop) ----------
    Labels come from the backend's ref snapshot, formatted the way git's %D
    would show them so groupRefs reads both this and pasted logs. */
-function decFromRefs(r){
-  const m = new Map(), add = (sha, s) => { const a = m.get(sha); if (a) a.push(s); else m.set(sha, [s]); };
+function decFromRefs(r: Refs){
+  const m = new Map<string, string[]>(), add = (sha: string, s: string) => { const a = m.get(sha); if (a) a.push(s); else m.set(sha, [s]); };
   const onBranch = r.headRef && r.headRef.startsWith('refs/heads/') && r.refs.some(([, n]) => n === r.headRef);
   if (r.headSha && !onBranch) add(r.headSha, 'HEAD');
   r.refs.forEach(([sha, name]) => {
@@ -249,11 +270,11 @@ function decFromRefs(r){
     else if (name.startsWith('refs/remotes/')) add(sha, name.slice(13));
     else if (name.startsWith('refs/tags/')) add(sha, 'tag: ' + name.slice(10));
   });
-  const out = new Map();
+  const out = new Map<string, string>();
   m.forEach((a, sha) => out.set(sha, a.join(', ')));
   return out;
 }
-function tipsOf(r){
+function tipsOf(r: Refs){
   const t = new Set(r.refs.map(([sha]) => sha));
   if (r.headSha) t.add(r.headSha);
   return t;
@@ -265,7 +286,8 @@ function tipsOf(r){
    the result matches a fresh load; the caller then reloads. */
 /* refs: the refs the walk starts from (tips); labels: what gets labelled
    (defaults to refs; solo adds tags that are not part of the walk). */
-function planSync(cur, refs, fresh, labels = refs){
+interface SyncFrom { commits: Commit[]; idx: Map<string, number>; tips: Set<string>; more?: boolean }
+function planSync(cur: SyncFrom, refs: Refs, fresh: Commit[], labels: Refs = refs){
   const tips = tipsOf(refs);
   const added = fresh.filter(c => !cur.idx.has(c.hash));
   const removed = [...cur.tips].filter(t => !tips.has(t));
@@ -274,41 +296,42 @@ function planSync(cur, refs, fresh, labels = refs){
     // Loaded rows are a prefix of a children-first order, so every child of
     // a loaded commit is loaded too. Walking parents inside the loaded set
     // therefore finds exactly the loaded commits that are still reachable.
-    const seen = new Uint8Array(cur.commits.length), stack = [];
+    const seen = new Uint8Array(cur.commits.length), stack: number[] = [];
     cur.commits.forEach((c, i) => { if (c.stashRow) seen[i] = 1; });   // stash rows hang off refs/stash, not branches
-    const reach = h => { const i = cur.idx.get(h); if (i !== undefined && !seen[i]) { seen[i] = 1; stack.push(i); } };
+    const reach = (h: string) => { const i = cur.idx.get(h); if (i !== undefined && !seen[i]) { seen[i] = 1; stack.push(i); } };
     tips.forEach(reach);
     added.forEach(c => c.parents.forEach(reach));
-    while (stack.length) cur.commits[stack.pop()].parents.forEach(reach);
+    while (stack.length) cur.commits[stack.pop()!]!.parents.forEach(reach);
     if (seen.includes(0)) return { full: 'history was rewritten' };
   }
   const order = mergeNew(added, cur.commits, cur.idx);
   // A new commit older than every loaded row belongs somewhere in the part
   // not loaded yet; only a reload can put it in the right place.
-  if (cur.more && added.length && added.includes(order[order.length - 1])) return { full: 'new commits below the loaded rows' };
+  if (cur.more && added.length && added.includes(order[order.length - 1]!)) return { full: 'new commits below the loaded rows' };
   return { tips, added, removed, order, dec: decFromRefs(labels), refs };
 }
 
 /* Places new commits among the loaded ones the way `git log --date-order`
    would: newest committer time first, but every new commit above its
    parents. New commits are never parents of old ones. */
-function mergeNew(added, old, idx){
+function mergeNew(added: Commit[], old: Commit[], idx: Map<string, number>): Commit[]{
   if (!added.length) return old;
-  const need = new Map();   // old hash -> last new commit that must precede it
+  const need = new Map<string, number>();   // old hash -> last new commit that must precede it
   added.forEach((c, k) => c.parents.forEach(p => { if (idx.has(p)) need.set(p, k); }));
-  const out = []; let k = 0;
+  const out: Commit[] = []; let k = 0;
+  // Sync only runs on desktop, whose records always carry ctime.
   for (const o of old) {
-    const must = need.has(o.hash) ? need.get(o.hash) : -1;
-    while (k < added.length && (k <= must || added[k].ctime >= o.ctime)) out.push(added[k++]);
+    const must = need.has(o.hash) ? need.get(o.hash)! : -1;
+    while (k < added.length && (k <= must || added[k]!.ctime! >= o.ctime!)) out.push(added[k++]!);
     out.push(o);
   }
-  while (k < added.length) out.push(added[k++]);
+  while (k < added.length) out.push(added[k++]!);
   return out;
 }
 
 /* Y maps a content y to canvas y; it clamps so an edge spanning thousands of
    rows never hands the canvas huge coordinates. */
-function traceEdge(ctx, e, n, Y){
+function traceEdge(ctx: CanvasRenderingContext2D, e: Edge, n: number, Y: (y: number) => number){
   const rr = 8, x1 = lx(e.fromLane), y1 = ry(e.from), xT = lx(e.lane);
   const y2 = e.to >= 0 ? ry(e.to) : n * ROW_H + 6, x2 = lx(e.toLane);
   ctx.moveTo(x1, Y(y1));
@@ -318,23 +341,26 @@ function traceEdge(ctx, e, n, Y){
 }
 
 /* ---------- state ---------- */
-let S = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
-let sel = -1, matches = [], matchPtr = -1, matchSet = null;
+let S: AppState = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
+let sel = -1, matches: number[] = [], matchPtr = -1, matchSet: Set<number> | null = null;
 const wrap = $('#wrap'), grid = $('#grid'), body = $('#body'), detail = $('#detail');
 /* Column widths in px. graph null = wide enough for every lane; msg null =
    fill the space left over. Saved per viewer. */
+interface Cols { ref: number; graph: number | null; msg: number | null; date: number }
+type ColKey = keyof Cols;
 const COLS = {
   ref:   { min: 90, max: 600,  reset: () => (window.innerWidth < 600 ? 130 : 210) },
   graph: { min: 40, max: 8000, reset: () => null },
   msg:   { min: 140, max: 4000, reset: () => null },
   date:  { min: 60, max: 320,  reset: () => 160 },
-};
-const cols = { ref: +lsGet('lanes.refw') || COLS.ref.reset(), graph: null, msg: null, date: 160, ...lsJSON('lanes.cols', {}) };
+} satisfies Record<ColKey, { min: number; max: number; reset: () => number | null }>;
+const cols: Cols = { ref: +lsGet('lanes.refw')! || COLS.ref.reset(), graph: null, msg: null, date: 160, ...lsJSON<Partial<Cols>>('lanes.cols', {}) };
 // 120 was the default for the old relative date ("3 days ago"), too narrow for yyyy-MM-dd HH:mm:ss
 if (cols.date === 120) cols.date = COLS.date.reset();
-for (const k of Object.keys(COLS)) {
-  const v = cols[k];
-  if (v !== null && !(Number.isFinite(v) && v >= COLS[k].min && v <= COLS[k].max)) cols[k] = COLS[k].reset();
+for (const k of Object.keys(COLS) as ColKey[]) {
+  // Saved widths come from localStorage, so check each one; ref/date reset to a number.
+  const all = cols as Record<ColKey, number | null>, v = all[k];
+  if (v !== null && !(Number.isFinite(v) && v >= COLS[k].min && v <= COLS[k].max)) all[k] = COLS[k].reset();
 }
 const saveCols = () => lsSet('lanes.cols', JSON.stringify(cols));
 const graphColW = () => cols.graph || S.graphW || 0;
@@ -356,9 +382,11 @@ const moreRow = document.createElement('div');
 moreRow.className = 'more-row';
 moreRow.textContent = 'Loading more commits…';
 moreRow.hidden = true;
-const pool = new Map();      // row index -> row element currently in the DOM
-let tiles = [];              // tiles[t] = edges touching rows [t*TILE, (t+1)*TILE)
-let stamp = 0, drawQueued = false, theme = null;
+const pool = new Map<number, HTMLDivElement>();      // row index -> row element currently in the DOM
+let tiles: Edge[][] = [];    // tiles[t] = edges touching rows [t*TILE, (t+1)*TILE)
+interface Theme { stroke: string; ring: string; muted: string }
+// Read by render() before anything is drawn.
+let stamp = 0, drawQueued = false, theme: Theme | null = null;
 let ON_COL = PALETTE.map(textOn);
 
 /* Returns true when the lane palette changed (rows, panel and card then need redrawing). */
@@ -383,10 +411,10 @@ function applyTheme(){
   } else scheduleDraw();
 }
 
-function nodeR(c){ return c.parents.length > 1 ? DOT : R; }
+function nodeR(c: Commit){ return c.parents.length > 1 ? DOT : R; }
 
 // k: the label's index in its commit's groups (graph labels; the branch menu reads it).
-function pill(g, col, k){
+function pill(g: RefGroup, col: string, k?: number){
   const isHead = g.head;
   const style = isHead ? `--c:${col};background:${col};color:${textOn(col)}` : `--c:${col};background:${col}2e`;
   const icons = g.kind === 'tag' ? ICON.tag : (g.local ? ICON.laptop : '') + (g.remotes.length ? ICON.cloud : '');
@@ -396,16 +424,16 @@ function pill(g, col, k){
 
 /* opts.remotes: real remote names from `git remote` (desktop); otherwise guessed.
    opts.keep: preserve selection and scroll position (used by auto-refresh). */
-function guessRemotes(raws){
+function guessRemotes(raws: RawCommit[]){
   const remotes = new Set(['origin','upstream']);
-  raws.forEach(c => c.dec.split(',').forEach(r => { const m = r.trim().match(/^([^\s/]+)\/HEAD$/); if (m) remotes.add(m[1]); }));
+  raws.forEach(c => c.dec.split(',').forEach(r => { const m = r.trim().match(/^([^\s/]+)\/HEAD$/); if (m) remotes.add(m[1]!); }));
   return remotes;
 }
 
 /* Browser mode has no ref listing; rebuild one from the %D labels so both
    modes label, list and hide branches the same way. */
-function refsFromDec(raws, remotes){
-  const refs = []; let headRef = null, headSha = null;
+function refsFromDec(raws: RawCommit[], remotes: Set<string>): Refs{
+  const refs: [string, string][] = []; let headRef: string | null = null, headSha: string | null = null;
   raws.forEach(c => c.dec.split(',').map(s => s.trim()).filter(Boolean).forEach(d => {
     if (d === 'HEAD') { headSha = c.hash; return; }
     if (d.startsWith('HEAD -> ')) { d = d.slice(8); headRef = 'refs/heads/' + d; headSha = c.hash; }
@@ -416,7 +444,11 @@ function refsFromDec(raws, remotes){
   return { refs, headRef, headSha };
 }
 
-function setData(raws, repo, sample, opts = {}){
+interface DataOpts {
+  remotes?: string[]; refs?: Refs; hidden?: string[]; solo?: string[]; keep?: boolean;
+  ordered?: boolean; note?: string; more?: boolean; capped?: boolean;
+}
+function setData(raws: Commit[], repo: string, sample: boolean, opts: DataOpts = {}){
   const remotes = opts.remotes ? new Set(opts.remotes) : guessRemotes(raws);
   // Labels and sync tips come from the refs left after hiding; the panel
   // lists them all (S.refs).
@@ -425,7 +457,7 @@ function setData(raws, repo, sample, opts = {}){
   // `git log --date-order` already lists children before parents; only
   // pasted logs (browser mode) need sorting.
   const commits = opts.ordered ? raws : topoOrder(raws);
-  const keepHash = opts.keep && S.commits[sel] ? S.commits[sel].hash : null;
+  const keepHash = opts.keep ? S.commits[sel]?.hash ?? null : null;
   const anchor = scrollAnchor(), left = wrap.scrollLeft, top = wrap.scrollTop;
   const track = opts.keep ? S.track : null;   // upstream counts until branch_tracking answers again
   S = { commits: [], idx: new Map(), edges: [], maxLane: 0, lay: newLayout(), remotes,
@@ -443,43 +475,45 @@ function setData(raws, repo, sample, opts = {}){
    stays at the top, so new commits show up there. */
 function scrollAnchor(){
   const top = wrap.scrollTop - rowOff, i = Math.min(Math.floor(top / ROW_H), S.commits.length - 1);
-  return top > 0 && i >= 0 ? { hash: S.commits[i].hash, off: top - i * ROW_H } : null;
+  return top > 0 && i >= 0 ? { hash: S.commits[i]!.hash, off: top - i * ROW_H } : null;
 }
-function anchoredTop(anchor, fallback){
+function anchoredTop(anchor: { hash: string; off: number } | null, fallback: number){
   if (!anchor) return 0;
   const i = S.idx.get(anchor.hash);
   return i === undefined ? fallback : rowOff + i * ROW_H + anchor.off;
 }
 
-function prepCommit(c){
+function prepCommit(c: Commit){
   // c.dec stays as git printed it: browser mode rebuilds refs from it when
-  // branches are hidden or shown.
-  c.groups = groupRefs(S.refDec ? S.refDec.get(c.hash) || '' : c.dec, S.remotes);
+  // branches are hidden or shown. S.remotes is set by setData before any commit.
+  c.groups = groupRefs(S.refDec ? S.refDec.get(c.hash) || '' : c.dec, S.remotes!);
   c.ini = initials(c.author);
   c.hay = `${c.subject} ${c.author} ${c.email} ${c.hash} ${c.groups.map(g => g.name).join(' ')}`.toLowerCase();
 }
 
 /* Adds rows below the ones already loaded; earlier rows keep their layout. */
-function appendCommits(list){
+function appendCommits(list: Commit[]){
   const start = S.commits.length;
   list.forEach(c => { if (!S.idx.has(c.hash)) { S.idx.set(c.hash, S.commits.length); S.commits.push(c); } });
-  for (let i = start; i < S.commits.length; i++) prepCommit(S.commits[i]);
-  layoutRows(S.lay, S.commits, start, S.idx, S.edges);
-  S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax || 0);
+  for (let i = start; i < S.commits.length; i++) prepCommit(S.commits[i]!);
+  layoutRows(S.lay!, S.commits, start, S.idx, S.edges);
+  S.maxLane = Math.max(S.lay!.maxLane, S.stashLaneMax || 0);
 }
 
 /* Applies a planSync result in place: new rows are merged in, labels are
-   refreshed, and the view stays on the same commit. */
-function applySync(plan){
-  const sameDec = !plan.added.length && plan.dec.size === S.refDec.size
-    && [...plan.dec].every(([sha, d]) => S.refDec.get(sha) === d);
+   refreshed, and the view stays on the same commit. Sync runs only on a
+   loaded desktop repo, so S.refDec is set. */
+type SyncPlan = Exclude<ReturnType<typeof planSync>, { full: string }> & { allRefs?: Refs };
+function applySync(plan: SyncPlan){
+  const sameDec = !plan.added.length && plan.dec.size === S.refDec!.size
+    && [...plan.dec].every(([sha, d]) => S.refDec!.get(sha) === d);
   S.tips = plan.tips; S.refs = plan.allRefs || plan.refs;
   if (sameDec) return false;   // e.g. only stash or notes refs moved
 
-  const keepHash = S.commits[sel] ? S.commits[sel].hash : null;
+  const keepHash = S.commits[sel]?.hash ?? null;
   const anchor = scrollAnchor(), top = wrap.scrollTop;
 
-  const oldDec = S.refDec;
+  const oldDec = S.refDec!;
   S.refDec = plan.dec;
   S.commits.forEach(c => { if ((oldDec.get(c.hash) || '') !== (plan.dec.get(c.hash) || '')) prepCommit(c); });
   if (plan.added.length) {
@@ -489,23 +523,23 @@ function applySync(plan){
     S.edges = []; S.lay = newLayout();
     layoutRows(S.lay, S.commits, 0, S.idx, S.edges);   // rows on top shift the lanes below
     laneStashes();
-    S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax);
+    S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax!);   // set by laneStashes
   }
   render(keepHash, { top: anchoredTop(anchor, top), left: wrap.scrollLeft });
   return true;
 }
 
-function makeRow(i){
-  const c = S.commits[i], col = c.stashRow ? theme.muted : laneCol(c.color);
+function makeRow(i: number){
+  const c = S.commits[i]!, col = c.stashRow ? theme!.muted : laneCol(c.color);
   let refs = '';
   if (c.groups.length) {
-    refs = pill(c.groups[0], col, 0);
+    refs = pill(c.groups[0]!, col, 0);
     if (c.groups.length > 1) refs += `<span class="more" title="${esc(c.groups.slice(1).map(g => g.name).join(', '))}">+${c.groups.length - 1}</span>`;
     refs += `<span class="conn" style="background:${col}"></span>`;
   }
   const el = document.createElement('div');
   el.className = 'row' + (c.stashRow ? ' stash-row' : '') + (i === sel ? ' sel' : '') + (matchSet && !matchSet.has(i) ? ' dim' : '');
-  el.dataset.i = i;
+  el.dataset.i = String(i);
   el.style.top = rowOff + i * ROW_H + 'px';
   if (c.groups.length) el.style.setProperty('--tint', col + '12');
   el.innerHTML = `<div class="col-ref">${refs}</div><div class="col-graph"></div>`
@@ -521,39 +555,39 @@ function makeRow(i){
 const refPop = document.createElement('div');
 refPop.className = 'ref-pop'; refPop.hidden = true;
 let refPopI = -1, refPopTimer = 0;   // the row it is for (or about to open for)
-function openRefPop(i){
+function openRefPop(i: number){
   const c = S.commits[i]; if (!c) return;
-  const col = c.stashRow ? theme.muted : laneCol(c.color);
+  const col = c.stashRow ? theme!.muted : laneCol(c.color);
   // Each label sits on its own opaque backing; the box around them is see-through.
   refPop.innerHTML = c.groups.map((g, k) => `<span class="ref-item">${pill(g, col, k)}</span>`).join('');
-  refPop.dataset.i = i;
+  refPop.dataset.i = String(i);
   refPop.style.top = rowOff + i * ROW_H + 'px';
   if (!refPop.isConnected) body.append(refPop);
   refPop.hidden = false;
 }
 function closeRefPop(){ clearTimeout(refPopTimer); refPopTimer = 0; refPopI = -1; refPop.hidden = true; }
-const refCellRow = el => { const cell = el && el.closest && el.closest('.row .col-ref'), row = cell && cell.parentElement; return row && row !== wipRow ? +row.dataset.i : -1; };
+const refCellRow = (el: EventTarget | null) => { const cell = el instanceof Element ? el.closest('.row .col-ref') : null, row = cell && cell.parentElement; return row && row !== wipRow ? +row.dataset.i! : -1; };
 body.addEventListener('mouseover', e => {
-  if (refPop.contains(e.target)) return;
+  if (e.target instanceof Node && refPop.contains(e.target)) return;
   const i = refCellRow(e.target);
   if (i === refPopI) return;
   closeRefPop();
-  if (i >= 0 && S.commits[i].groups.length > 1) { refPopI = i; refPopTimer = setTimeout(() => openRefPop(i), 120); }
+  if (i >= 0 && S.commits[i]!.groups.length > 1) { refPopI = i; refPopTimer = setTimeout(() => openRefPop(i), 120); }
 });
 body.addEventListener('mouseout', e => {
   // Moving between the cell and its box (or within the box) keeps it.
   const to = e.relatedTarget;
-  if (refPopI < 0 || (to && refPop.contains(to)) || refCellRow(to) === refPopI) return;
+  if (refPopI < 0 || (to instanceof Node && refPop.contains(to)) || refCellRow(to) === refPopI) return;
   closeRefPop();
 });
 
 /* Index edges by row tile so a frame only looks at edges near the viewport. */
 function buildTiles(){
   const n = S.commits.length;
-  tiles = Array.from({ length: Math.ceil(n / TILE) }, () => []);
+  tiles = Array.from({ length: Math.ceil(n / TILE) }, (): Edge[] => []);
   S.edges.forEach(e => {
     const end = e.to >= 0 ? e.to : n - 1;
-    for (let t = Math.floor(e.from / TILE), last = Math.floor(end / TILE); t <= last; t++) tiles[t].push(e);
+    for (let t = Math.floor(e.from / TILE), last = Math.floor(end / TILE); t <= last; t++) tiles[t]!.push(e);
   });
 }
 
@@ -573,7 +607,7 @@ function draw(){
   if (S.more && b >= n - PREFETCH) loadMore();
 }
 
-function syncRows(a, b){
+function syncRows(a: number, b: number){
   for (const [i, el] of pool) if (i < a || i >= b) { el.remove(); pool.delete(i); }
   const frag = document.createDocumentFragment();
   for (let i = a; i < b; i++) if (!pool.has(i)) { const el = makeRow(i); pool.set(i, el); frag.appendChild(el); }
@@ -581,7 +615,7 @@ function syncRows(a, b){
 }
 
 /* The canvas covers only the visible part of the graph column, rows [a, b). */
-function paintGraph(a, b){
+function paintGraph(a: number, b: number){
   const n = S.commits.length;
   // Lanes past a narrowed graph column are simply cut off.
   const gx0 = Math.floor(Math.max(0, wrap.scrollLeft - cols.ref));
@@ -596,20 +630,21 @@ function paintGraph(a, b){
   if (canvas.height !== ph) canvas.height = ph;
   canvas.style.cssText = `left:${cols.ref + gx0}px;top:${rowOff + r0 * ROW_H}px;width:${w}px;height:${h}px`;
 
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
+  const th = theme!;
   ctx.setTransform(dpr, 0, 0, dpr, -gx0 * dpr, 0);
   ctx.clearRect(gx0, 0, w, h);
-  const oy = r0 * ROW_H, Y = v => Math.max(-64, Math.min(h + 64, v - oy));
+  const oy = r0 * ROW_H, Y = (v: number) => Math.max(-64, Math.min(h + 64, v - oy));
 
   ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   stamp++;
   const t1 = Math.floor(Math.min(n - 1, b) / TILE);
   for (let t = Math.floor(Math.max(0, a - 1) / TILE); t <= t1; t++) {
-    for (const e of tiles[t]) {
+    for (const e of tiles[t]!) {
       if (e.stamp === stamp) continue;
       e.stamp = stamp;
       if (e.from > b || (e.to >= 0 ? e.to : n) < a - 1) continue;
-      if (e.color < 0) { ctx.setLineDash([3, 3]); ctx.strokeStyle = theme.muted; } else ctx.strokeStyle = laneCol(e.color);
+      if (e.color < 0) { ctx.setLineDash([3, 3]); ctx.strokeStyle = th.muted; } else ctx.strokeStyle = laneCol(e.color);
       ctx.beginPath(); traceEdge(ctx, e, n, Y); ctx.stroke();
       if (e.color < 0) ctx.setLineDash([]);
     }
@@ -617,7 +652,7 @@ function paintGraph(a, b){
 
   ctx.lineCap = 'butt'; ctx.globalAlpha = 0.6;
   for (let i = a; i < b; i++) {
-    const c = S.commits[i]; if (!c.groups.length) continue;
+    const c = S.commits[i]!; if (!c.groups.length) continue;
     ctx.strokeStyle = laneCol(c.color);
     ctx.beginPath(); ctx.moveTo(0, Y(ry(i))); ctx.lineTo(lx(c.lane) - nodeR(c), Y(ry(i))); ctx.stroke();
   }
@@ -628,44 +663,44 @@ function paintGraph(a, b){
   // all: one in some lane would look like it belonged to that branch.
   const hc = on ? wipHead() : -1;
   if (hc >= 0) {
-    const x = lx(S.commits[hc].lane);
+    const head = S.commits[hc]!, x = lx(head.lane);
     ctx.save();
     ctx.setLineDash([3, 3]); ctx.lineWidth = 2; ctx.lineCap = 'butt';
-    ctx.strokeStyle = laneCol(S.commits[hc].color);
-    if (a <= hc) { ctx.beginPath(); ctx.moveTo(x, Y(ry(-1) + R)); ctx.lineTo(x, Y(ry(hc) - nodeR(S.commits[hc]))); ctx.stroke(); }
+    ctx.strokeStyle = laneCol(head.color);
+    if (a <= hc) { ctx.beginPath(); ctx.moveTo(x, Y(ry(-1) + R)); ctx.lineTo(x, Y(ry(hc) - nodeR(head))); ctx.stroke(); }
     if (r0 < 0) {
       ctx.beginPath(); ctx.arc(x, Y(ry(-1)), R - 1, 0, Math.PI * 2);
-      ctx.fillStyle = theme.stroke; ctx.fill(); ctx.stroke();
-      if (wipSel) { ctx.setLineDash([]); ctx.strokeStyle = theme.ring; ctx.beginPath(); ctx.arc(x, Y(ry(-1)), R + 3.5, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.fillStyle = th.stroke; ctx.fill(); ctx.stroke();
+      if (wipSel) { ctx.setLineDash([]); ctx.strokeStyle = th.ring; ctx.beginPath(); ctx.arc(x, Y(ry(-1)), R + 3.5, 0, Math.PI * 2); ctx.stroke(); }
     }
     ctx.restore();
   }
 
-  ctx.lineWidth = 2.5; ctx.strokeStyle = theme.stroke;
+  ctx.lineWidth = 2.5; ctx.strokeStyle = th.stroke;
   ctx.font = NODE_FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (let i = a; i < b; i++) {
-    const c = S.commits[i], x = lx(c.lane), y = Y(ry(i)), k = c.color % PALETTE.length;
+    const c = S.commits[i]!, x = lx(c.lane), y = Y(ry(i)), k = c.color % PALETTE.length;
     if (c.stashRow) {   // a gray box, like GitKraken's stash nodes
       ctx.beginPath(); ctx.roundRect(x - R + 1.5, y - R + 1.5, 2 * R - 3, 2 * R - 3, 4);
-      ctx.fillStyle = theme.muted; ctx.fill(); ctx.stroke();
-      ctx.fillStyle = theme.stroke; ctx.fillRect(x - 4, y - 1, 8, 2);
+      ctx.fillStyle = th.muted; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = th.stroke; ctx.fillRect(x - 4, y - 1, 8, 2);
       continue;
     }
     ctx.beginPath(); ctx.arc(x, y, nodeR(c), 0, Math.PI * 2);
-    ctx.fillStyle = PALETTE[k]; ctx.fill(); ctx.stroke();
-    if (c.parents.length <= 1) { ctx.fillStyle = ON_COL[k]; ctx.fillText(c.ini, x, y + 0.5); }
+    ctx.fillStyle = PALETTE[k]!; ctx.fill(); ctx.stroke();
+    if (c.parents.length <= 1) { ctx.fillStyle = ON_COL[k]!; ctx.fillText(c.ini, x, y + 0.5); }
   }
 
   if (sel >= a && sel < b) {
-    const c = S.commits[sel];
-    ctx.lineWidth = 2; ctx.strokeStyle = theme.ring;
+    const c = S.commits[sel]!;
+    ctx.lineWidth = 2; ctx.strokeStyle = th.ring;
     ctx.beginPath(); ctx.arc(lx(c.lane), Y(ry(sel)), nodeR(c) + 3.5, 0, Math.PI * 2); ctx.stroke();
   }
 
   // A graph column narrower than the lanes fades out at its edge instead of
   // ending in a hard cut, so it reads as "more to the right".
   const colW = graphColW();
-  if (colW < S.graphW && gx1 > colW - 18) {
+  if (colW < S.graphW! && gx1 > colW - 18) {   // graphW is set by updateView
     const fade = ctx.createLinearGradient(colW - 18, 0, colW, 0);
     fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,1)');
     ctx.globalCompositeOperation = 'destination-out';
@@ -684,8 +719,8 @@ function updateView(){
   placeRows();
   buildTiles();
 
-  let headG = null;
-  const branches = new Set(), tags = new Set();
+  let headG = null as RefGroup | null;   // assigned inside the callback below
+  const branches = new Set<string>(), tags = new Set<string>();
   S.commits.forEach(c => c.groups.forEach(g => {
     (g.kind === 'tag' ? tags : branches).add(g.name);
     if (g.head && !headG) headG = g;
@@ -701,7 +736,7 @@ function updateView(){
   document.title = `${S.repo || 'Repository'} — GitKrapao`;
 }
 
-function render(keepHash, keepScroll){
+function render(keepHash: string | null, keepScroll: { top: number; left: number } | null){
   const n = S.commits.length;
   closeRefPop();
   for (const el of pool.values()) el.remove();
@@ -720,7 +755,7 @@ function render(keepHash, keepScroll){
     detailFor = null;
     detail.innerHTML = '<div class="empty">This repository has no commits yet</div>';
   } else if (keepHash && S.idx.has(keepHash)) {
-    select(S.idx.get(keepHash), { detail: show });
+    select(S.idx.get(keepHash)!, { detail: show });
   } else {
     const headIdx = S.commits.findIndex(c => c.groups.some(g => g.head));
     select(headIdx >= 0 ? headIdx : 0, { scroll: !keepScroll, detail: show });
@@ -732,14 +767,14 @@ function render(keepHash, keepScroll){
 /* ---------- selection & detail ---------- */
 /* detail: false keeps a stash or pull request card in the detail panel
    while the graph shows the commit it belongs to. */
-function select(i, { scroll = false, open = false, detail: show = true } = {}){
+function select(i: number, { scroll = false, open = false, detail: show = true }: { scroll?: boolean; open?: boolean; detail?: boolean } = {}){
   if (!(i >= 0 && i < S.commits.length)) return;
-  if (pool.has(sel)) pool.get(sel).classList.remove('sel');
+  pool.get(sel)?.classList.remove('sel');
   if (wipSel) { wipSel = false; wipRow.classList.remove('sel'); }
   sel = i;
-  if (pool.has(i)) pool.get(i).classList.add('sel');
+  pool.get(i)?.classList.add('sel');
   if (show) {
-    const c = S.commits[i], st = c.stashRow && stashes.find(x => x.key === c.stashKey);
+    const c = S.commits[i]!, st = c.stashRow && stashes.find(x => x.key === c.stashKey);
     if (st) stashCard(st); else renderDetail(c);
   }
   markSide();
@@ -747,16 +782,16 @@ function select(i, { scroll = false, open = false, detail: show = true } = {}){
   if (open) detail.classList.add('open');
   scheduleDraw();
 }
-function ensureVisible(i){
+function ensureVisible(i: number){
   const top = HEAD_H + rowOff + i * ROW_H;
   if (top < wrap.scrollTop + HEAD_H) wrap.scrollTop = top - HEAD_H;
   else if (top + ROW_H > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = top + ROW_H - wrap.clientHeight;
 }
-function hashLink(h){
+function hashLink(h: string){
   return S.idx.has(h) ? `<button class="hash-link" data-jump="${esc(h)}">${esc(h.slice(0,7))}</button>` : `<code class="muted" title="Not in the loaded history">${esc(h.slice(0,7))}</code>`;
 }
-let detailFor = null;        // what the detail panel shows: a commit, stash or pull request
-function renderDetail(c){
+let detailFor: Shown | null = null;        // what the detail panel shows: a commit, stash or pull request
+function renderDetail(c: Commit){
   const col = laneCol(c.color);
   detailFor = c;
   detail.innerHTML =
@@ -768,7 +803,7 @@ function renderDetail(c){
     + `<dl class="d-meta"><dt>Date</dt><dd>${esc(absDate(c.time))} <span class="muted">(${esc(rel(c.time))})</span></dd>`
     + `<dt>SHA</dt><dd><code>${esc(c.hash)}</code></dd>`
     + `<dt>Parents</dt><dd>${c.parents.length ? c.parents.map(hashLink).join('') : '<span class="muted">None, this is a root commit</span>'}</dd>`
-    + `<dt>Children</dt><dd>${c.children.length ? c.children.map(i => hashLink(S.commits[i].hash)).join('') : '<span class="muted">None in loaded history</span>'}</dd></dl>`
+    + `<dt>Children</dt><dd>${c.children.length ? c.children.map(i => hashLink(S.commits[i]!.hash)).join('') : '<span class="muted">None in loaded history</span>'}</dd></dl>`
     + (c.parents.length > 1 ? '<p class="muted note">Merge commit, shown as a small dot on the graph.</p>' : '')
     + (NATIVE && current ? '<div id="dFiles" class="d-files"><p class="muted">Loading changes…</p></div>' : '');
   requestDetail(c);
@@ -778,33 +813,37 @@ function renderDetail(c){
    Full message and changed files come from `git show` when a commit is
    selected. Arrow-key browsing waits briefly so only the commit it stops on
    is fetched; results are cached since commits never change. */
-const detailCache = new Map(), DETAIL_CACHE = 300;
+const detailCache = new Map<string, CommitDetail>(), DETAIL_CACHE = 300;
 let detailSeq = 0, detailTimer = 0;
-function requestDetail(c){
+/** A commit or a stash card: both list the files of a commit. */
+type DetailSource = Commit | Extract<Card, { card: 'stash' }>;
+function requestDetail(c: DetailSource){
   if (!NATIVE || !current) return;
   const key = current.path + '\n' + c.hash, seq = ++detailSeq;
   clearTimeout(detailTimer);
-  if (detailCache.has(key)) { fillDetail(c, detailCache.get(key)); return; }
+  if (detailCache.has(key)) { fillDetail(c, detailCache.get(key)!); return; }
   detailTimer = setTimeout(async () => {
     try {
-      const d = await core.invoke('commit_detail', { path: current.path, sha: c.hash });
+      // Read when the timer fires (as before); a closed repo throws into the catch below.
+      const d = await invoke('commit_detail', { path: current!.path, sha: c.hash });
       detailCache.set(key, d);
-      if (detailCache.size > DETAIL_CACHE) detailCache.delete(detailCache.keys().next().value);
+      if (detailCache.size > DETAIL_CACHE) detailCache.delete(detailCache.keys().next().value!);
       if (seq === detailSeq) fillDetail(c, d);
     } catch (e) {
-      const box = $('#dFiles');
+      // #dFiles is part of the card's HTML, so it is gone once another card replaced it.
+      const box = document.querySelector<HTMLElement>('#dFiles');
       if (seq === detailSeq && box) box.innerHTML = `<p class="err">Could not load changes: ${esc(String(e))}</p>`;
     }
   }, 100);
 }
-function fillDetail(c, d){
-  const body = $('#dBody'), box = $('#dFiles');
-  if (!box || detailFor !== c) return;
+function fillDetail(c: DetailSource, d: CommitDetail){
+  const body = document.querySelector<HTMLElement>('#dBody'), box = document.querySelector<HTMLElement>('#dFiles');
+  if (!body || !box || detailFor !== c) return;
   // %B starts with the subject paragraph, which the heading already shows.
   const cut = d.body.search(/\n\s*\n/);
   const rest = cut < 0 ? '' : d.body.slice(cut).trim();
   body.innerHTML = rest ? `<div class="d-body">${esc(rest)}</div>` : '';
-  panelFiles = d.files.map(f => ({ kind: 'commit', sha: c.hash, path: f.path, oldPath: f.oldPath, status: f.status }));
+  panelFiles = d.files.map(f => ({ kind: 'commit' as const, sha: c.hash, path: f.path, oldPath: f.oldPath, status: f.status }));
   if (!d.totalFiles) { box.innerHTML = '<p class="muted">No file changes</p>'; return; }
   box.innerHTML =
     `<div class="d-files-head"><span>${d.totalFiles.toLocaleString('en')} ${d.totalFiles === 1 ? 'file' : 'files'} changed</span>`
@@ -815,7 +854,7 @@ function fillDetail(c, d){
     + (d.totalFiles > d.files.length ? `<p class="muted note">and ${(d.totalFiles - d.files.length).toLocaleString('en')} more files</p>` : '');
   markDiffRow();
 }
-function fileRow(f, i){
+function fileRow(f: FileChange, i: number){
   const slash = f.path.lastIndexOf('/');
   const dir = f.path.slice(0, slash + 1), name = f.path.slice(slash + 1);
   const full = (f.oldPath ? f.oldPath + ' → ' : '') + f.path;
@@ -825,7 +864,7 @@ function fileRow(f, i){
     + `<span class="ns">${stat}</span></li>`;
 }
 
-async function copyText(text, btn){
+async function copyText(text: string, btn?: HTMLElement | null){
   let ok = false;
   try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
     const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
@@ -841,14 +880,31 @@ async function copyText(text, btn){
    fetched fresh and follow WIP polls. */
 const diffPane = $('#diff'), dfBody = $('#dfBody');
 const DIFF_MAX_LINES = 20000, DF_CACHE = 100, HL_MAX_CHARS = 2000000;
-const dfCache = new Map();
-let panelFiles = [];         // files the detail card lists right now, as diff targets
-let dfList = [], dfAt = -1, dfSeq = 0;
-let dfPrefs = { split: false, full: false, ...lsJSON('lanes.diff', {}) };
+/** A file the detail card lists: of a commit (or stash), or of the work tree (WIP card). */
+type WipSide = 'staged' | 'unstaged' | 'untracked' | 'conflict';
+type DiffTarget =
+  | { kind: 'commit'; sha: string; path: string; oldPath: string | null; status: string; side?: undefined }
+  | { kind: 'wip'; side: WipSide; path: string; oldPath: string | null; status: string; sha?: undefined };
+interface DiffLine {
+  t: 'add' | 'del' | 'ctx'; o?: number; n?: number; s: string; noeol?: boolean;
+  /** Changed part, in code points (markWords). */
+  mark?: [number, number];
+  /** Syntax tokens of the old / new side (highlightDiff). */
+  ho?: Token[] | null; hn?: Token[] | null;
+}
+interface Hunk { head: string; lines: DiffLine[] }
+interface ParsedDiff { hunks: Hunk[]; binary: boolean; meta: string[]; add: number; del: number }
+type LineToks = Map<number, { s: string; t: Token[] }>;
+/** A file_diff result; `tok` caches the whole-file colors on the cached object. */
+type DiffResult = FileDiff & { tok?: { old: LineToks; neu: LineToks } | null };
+const dfCache = new Map<string, DiffResult>();
+let panelFiles: DiffTarget[] = [];         // files the detail card lists right now, as diff targets
+let dfList: DiffTarget[] = [], dfAt = -1, dfSeq = 0;
+let dfPrefs = { split: false, full: false, ...lsJSON<{ split?: boolean; full?: boolean }>('lanes.diff', {}) };
 const diffOpen = () => !diffPane.hidden;
-const dfKey = f => f ? [f.kind, f.sha || '', f.side || '', f.oldPath || '', f.path].join('|') : '';
+const dfKey = (f: DiffTarget | undefined) => f ? [f.kind, f.sha || '', f.side || '', f.oldPath || '', f.path].join('|') : '';
 
-function openDiff(i){
+function openDiff(i: number){
   if (!panelFiles[i]) return;
   dfList = panelFiles; dfAt = i;
   diffPane.hidden = false;
@@ -862,7 +918,7 @@ function closeDiff(){
   diffPane.hidden = true; dfAt = -1; dfSeq++;
   markDiffRow();
 }
-function stepDiff(d){
+function stepDiff(d: number){
   const i = dfAt + d;
   if (i < 0 || i >= dfList.length) return;
   dfAt = i; markDiffRow(); loadDiff();
@@ -897,14 +953,15 @@ async function loadDiff(quiet = false){
     dfBody.innerHTML = '<p class="df-note">This file has a merge conflict. Resolve it in your editor; GitKrapao does not show conflict diffs.</p>';
     return;
   }
-  const kind = f.kind === 'commit' ? 'commit' : f.side;
+  // A WIP file always has a side, and conflicts returned above.
+  const kind: DiffKind = f.kind === 'commit' ? 'commit' : f.side as Exclude<WipSide, 'conflict'>;
   const repo = current.path;
-  const get = async context => {
+  const get = async (context: number): Promise<DiffResult> => {
     const key = kind === 'commit' ? [repo, f.sha, f.oldPath || '', f.path, context].join('\n') : null;
-    let r = key && dfCache.get(key);
-    if (r) return r;
-    r = await core.invoke('file_diff', { path: repo, kind, sha: f.sha || null, file: f.path, oldFile: f.oldPath || null, context });
-    if (key) { dfCache.set(key, r); if (dfCache.size > DF_CACHE) dfCache.delete(dfCache.keys().next().value); }
+    const hit = key ? dfCache.get(key) : undefined;
+    if (hit) return hit;
+    const r: DiffResult = await invoke('file_diff', { path: repo, kind, sha: f.sha || null, file: f.path, oldFile: f.oldPath || null, context });
+    if (key) { dfCache.set(key, r); if (dfCache.size > DF_CACHE) dfCache.delete(dfCache.keys().next().value!); }
     return r;
   };
   // In Changes mode a hunk can start inside a docstring or code fence, so the
@@ -913,17 +970,17 @@ async function loadDiff(quiet = false){
   const prime = !dfPrefs.full && kind !== 'untracked' && !'AD?'.includes(f.status)
     && !!(Syntax.lang(f.path) || (f.oldPath && Syntax.lang(f.oldPath)));
   const loading = !quiet && setTimeout(() => { if (seq === dfSeq) dfBody.innerHTML = '<p class="df-note">Loading…</p>'; }, 0);
-  let r, whole = null;
+  let r: DiffResult, whole: DiffResult | null = null;
   dfBusy = seq;
   try {
     [r, whole] = await Promise.all([get(dfPrefs.full ? 1000000 : 3), prime ? get(1000000).catch(() => null) : null]);
   } catch (e) {
-    clearTimeout(loading);
+    clearTimeout(loading || undefined);
     if (dfBusy === seq) dfBusy = 0;
     if (seq === dfSeq && !quiet) dfBody.innerHTML = `<p class="df-note err">${esc(String(e))}</p>`;
     return;
   }
-  clearTimeout(loading);
+  clearTimeout(loading || undefined);
   if (dfBusy === seq) dfBusy = 0;
   if (seq !== dfSeq) return;
   const shown = [dfKey(f), dfPrefs.split, dfPrefs.full, r.patch].join('\n');
@@ -935,21 +992,21 @@ async function loadDiff(quiet = false){
 }
 // A WIP poll: the open work tree diff may have changed even when git status did not.
 function refreshWipDiff(){
-  if (!dfBusy && diffOpen() && dfList[dfAt] && dfList[dfAt].kind === 'wip') loadDiff(true);
+  if (!dfBusy && diffOpen() && dfList[dfAt]?.kind === 'wip') loadDiff(true);
 }
 
 /* Unified diff text → hunks of lines with old/new numbers. Handles CRLF,
    "\ No newline at end of file", binary files and changes without hunks
    (mode only, pure renames, submodules). */
-function parseDiff(text){
-  const d = { hunks: [], binary: false, meta: [], add: 0, del: 0 };
-  let h = null, o = 0, n = 0;
+function parseDiff(text: string): ParsedDiff{
+  const d: ParsedDiff = { hunks: [], binary: false, meta: [], add: 0, del: 0 };
+  let h: Hunk | null = null, o = 0, n = 0;
   for (let line of text.split('\n')) {
     if (line.endsWith('\r')) line = line.slice(0, -1);
     if (line.startsWith('@@ ')) {
       const m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/);
       if (!m) { h = null; continue; }
-      o = +m[1]; n = +m[2];
+      o = +m[1]!; n = +m[2]!;
       h = { head: line, lines: [] }; d.hunks.push(h);
       continue;
     }
@@ -971,16 +1028,16 @@ function parseDiff(text){
 
 /* A run of removed lines followed by added lines is a change; pair them up
    and mark what changed inside each pair (common start and end trimmed). */
-function pairLines(lines){
+function pairLines(lines: DiffLine[]){
   for (let i = 0; i < lines.length;) {
-    if (lines[i].t !== 'del') { i++; continue; }
-    let j = i; while (j < lines.length && lines[j].t === 'del') j++;
-    let k = j; while (k < lines.length && lines[k].t === 'add') k++;
-    for (let q = 0; q < Math.min(j - i, k - j); q++) markWords(lines[i + q], lines[j + q]);
+    if (lines[i]!.t !== 'del') { i++; continue; }
+    let j = i; while (j < lines.length && lines[j]!.t === 'del') j++;
+    let k = j; while (k < lines.length && lines[k]!.t === 'add') k++;
+    for (let q = 0; q < Math.min(j - i, k - j); q++) markWords(lines[i + q]!, lines[j + q]!);
     i = k;
   }
 }
-function markWords(a, b){
+function markWords(a: DiffLine, b: DiffLine){
   const x = [...a.s], y = [...b.s];
   let pre = 0; while (pre < x.length && pre < y.length && x[pre] === y[pre]) pre++;
   let suf = 0; while (suf < x.length - pre && suf < y.length - pre && x[x.length - 1 - suf] === y[y.length - 1 - suf]) suf++;
@@ -992,7 +1049,7 @@ function markWords(a, b){
    removed line never colors the added lines after it. With the whole file's
    diff (`whole`) each line takes the colors of its line number in the old or
    new file; without it lexer state starts fresh at every hunk. */
-function lexSides(d, langOld, langNew, each){
+function lexSides(d: ParsedDiff, langOld: string | null, langNew: string | null, each: (l: DiffLine, ho: Token[] | null, hn: Token[] | null) => void){
   let lines = 0, chars = 0;
   for (const h of d.hunks) {
     const o = langOld && Syntax.lexer(langOld), n = langNew && Syntax.lexer(langNew);
@@ -1004,43 +1061,45 @@ function lexSides(d, langOld, langNew, each){
   return true;
 }
 // Old/new line number → { s, t } from the whole-file diff; kept on the (cached) result.
-function wholeTokens(r, langOld, langNew){
+function wholeTokens(r: DiffResult, langOld: string | null, langNew: string | null){
   if (r.tok !== undefined) return r.tok;
   r.tok = null;
   if (r.truncated || r.patch.length > HL_MAX_CHARS) return null;
-  const old = new Map(), neu = new Map();
+  const old: LineToks = new Map(), neu: LineToks = new Map();
+  // Old-side tokens exist only for lines with an old number, new-side ones with a new number.
   const done = lexSides(parseDiff(r.patch), langOld, langNew, (l, ho, hn) => {
-    if (ho) old.set(l.o, { s: l.s, t: ho });
-    if (hn) neu.set(l.n, { s: l.s, t: hn });
+    if (ho) old.set(l.o!, { s: l.s, t: ho });
+    if (hn) neu.set(l.n!, { s: l.s, t: hn });
   });
   if (done) r.tok = { old, neu };   // a file too big to color whole falls back to per-hunk state
   return r.tok;
 }
-function highlightDiff(d, f, whole){
+function highlightDiff(d: ParsedDiff, f: DiffTarget, whole: DiffResult | null){
   const langNew = Syntax.lang(f.path), langOld = f.oldPath ? Syntax.lang(f.oldPath) : langNew;
   if (!langNew && !langOld) return;
   const w = whole && wholeTokens(whole, langOld, langNew);
   if (!w) { lexSides(d, langOld, langNew, (l, ho, hn) => { l.ho = ho; l.hn = hn; }); return; }
-  const pick = (m, k, s) => { const x = m.get(k); return x && x.s === s ? x.t : null; };
+  const pick = (m: LineToks, k: number, s: string) => { const x = m.get(k); return x && x.s === s ? x.t : null; };
+  // Non-added lines have an old number, non-removed lines a new one.
   for (const h of d.hunks) for (const l of h.lines) {
-    if (l.t !== 'add') l.ho = pick(w.old, l.o, l.s);
-    if (l.t !== 'del') l.hn = pick(w.neu, l.n, l.s);
+    if (l.t !== 'add') l.ho = pick(w.old, l.o!, l.s);
+    if (l.t !== 'del') l.hn = pick(w.neu, l.n!, l.s);
   }
 }
 // Code point index (what markWords counts) → UTF-16 index (what the lexers count).
-function unitAt(s, cp){
+function unitAt(s: string, cp: number){
   let u = 0;
-  for (let c = 0; c < cp && u < s.length; c++) u += s.codePointAt(u) > 0xffff ? 2 : 1;
+  for (let c = 0; c < cp && u < s.length; c++) u += s.codePointAt(u)! > 0xffff ? 2 : 1;
   return u;
 }
 // side 'o' or 'n' picks the old or new side's colors (context lines have both).
-function codeHtml(l, side){
+function codeHtml(l: DiffLine, side: 'o' | 'n'){
   const s = l.s, toks = (side === 'o' ? l.ho : l.hn) || [];
   let html = '', ti = 0;
   // [a, b) of the line split at token edges; text is always escaped.
-  const piece = (a, b) => {
+  const piece = (a: number, b: number) => {
     while (a < b) {
-      while (ti < toks.length && toks[ti][1] <= a) ti++;
+      while (ti < toks.length && toks[ti]![1] <= a) ti++;
       const t = toks[ti];
       if (!t || t[0] >= b) { html += esc(s.slice(a, b)); return; }
       if (t[0] > a) { html += esc(s.slice(a, t[0])); a = t[0]; }
@@ -1059,32 +1118,33 @@ function codeHtml(l, side){
 
 function diffNav(){
   $('#dfPos').textContent = `${dfAt + 1} / ${dfList.length}`;
-  $('#dfPrev').disabled = dfAt <= 0; $('#dfNext').disabled = dfAt >= dfList.length - 1;
+  $<HTMLButtonElement>('#dfPrev').disabled = dfAt <= 0; $<HTMLButtonElement>('#dfNext').disabled = dfAt >= dfList.length - 1;
 }
-function diffBar(f, d){
+const ST_SHOWN_AS: Record<string, string> = { '?': 'A', '!': 'D' };
+function diffBar(f: DiffTarget, d: ParsedDiff | null){
   const slash = f.path.lastIndexOf('/');
-  $('#dfSt').className = 'st st-' + ({ '?': 'A', '!': 'D' }[f.status] || f.status);
+  $('#dfSt').className = 'st st-' + (ST_SHOWN_AS[f.status] || f.status);
   $('#dfSt').textContent = f.status;
   $('#dfPath').innerHTML = (f.oldPath && f.oldPath !== f.path ? `<span class="from">${esc(f.oldPath)} → </span>` : '')
     + `<span class="dir">${esc(f.path.slice(0, slash + 1))}</span>${esc(f.path.slice(slash + 1))}`;
   $('#dfPath').title = f.path;
   $('#dfStat').innerHTML = d && !d.binary ? `<span class="add">+${d.add.toLocaleString('en')}</span> <span class="del">−${d.del.toLocaleString('en')}</span>` : '';
   diffNav();
-  diffPane.querySelectorAll('[data-df-view]').forEach(b => b.classList.toggle('on', (b.dataset.dfView === 'split') === dfPrefs.split));
-  diffPane.querySelectorAll('[data-df-ctx]').forEach(b => b.classList.toggle('on', (b.dataset.dfCtx === 'full') === dfPrefs.full));
+  diffPane.querySelectorAll<HTMLElement>('[data-df-view]').forEach(b => b.classList.toggle('on', (b.dataset.dfView === 'split') === dfPrefs.split));
+  diffPane.querySelectorAll<HTMLElement>('[data-df-ctx]').forEach(b => b.classList.toggle('on', (b.dataset.dfCtx === 'full') === dfPrefs.full));
 }
 
-function renderDiff(f, r, whole){
+function renderDiff(f: DiffTarget, r: DiffResult, whole: DiffResult | null){
   const d = parseDiff(r.patch);
   diffBar(f, d);
-  const note = t => `<p class="df-note">${t}</p>`;
+  const note = (t: string) => `<p class="df-note">${t}</p>`;
   if (d.binary) { dfBody.innerHTML = note('Binary file: no text to compare.'); return; }
   if (!d.hunks.length) {
     const m = d.meta.join('\n');
     let t = 'No changes to show.';
     if (/^Large file/m.test(m)) t = esc(d.meta.find(x => x.startsWith('Large file'))) + '.';
     else if (/rename from/.test(m)) t = 'Renamed without changes.';
-    else if (/old mode/.test(m)) t = 'Only the file mode changed (' + esc(m.match(/old mode (\d+)/)[1]) + ' → ' + esc((m.match(/new mode (\d+)/) || [, '?'])[1]) + ').';
+    else if (/old mode/.test(m)) t = 'Only the file mode changed (' + esc(m.match(/old mode (\d+)/)![1]) + ' → ' + esc((m.match(/new mode (\d+)/) || [, '?'])[1]) + ').';
     else if (/new file mode/.test(m)) t = 'New empty file.';
     else if (/deleted file mode/.test(m)) t = 'Deleted an empty file.';
     dfBody.innerHTML = note(t);
@@ -1094,7 +1154,7 @@ function renderDiff(f, r, whole){
   const nums = Math.max(1, ...d.hunks.flatMap(h => h.lines.map(l => Math.max(l.o || 0, l.n || 0))));
   dfBody.style.setProperty('--nw', String(nums).length + 1 + 'ch');
   let count = 0, cut = false, html = '';
-  const sign = { add: '+', del: '−', ctx: ' ' };
+  const sign: Record<DiffLine['t'], string> = { add: '+', del: '−', ctx: ' ' };
   for (const h of d.hunks) {
     if (cut) break;
     html += `<div class="df-hunk">${esc(h.head)}</div>`;
@@ -1107,11 +1167,11 @@ function renderDiff(f, r, whole){
     }
     // Split: context on both sides; removed lines left, added right, side by side.
     for (let i = 0; i < h.lines.length && !cut;) {
-      const l = h.lines[i];
-      const cell = (x, side) => x ? `<span class="no">${side === 'l' ? x.o : x.n}</span><span class="code t-${x.t}">${codeHtml(x, side === 'l' ? 'o' : 'n')}</span>` : '<span class="no"></span><span class="code none"></span>';
+      const l = h.lines[i]!;
+      const cell = (x: DiffLine | undefined, side: 'l' | 'r') => x ? `<span class="no">${side === 'l' ? x.o : x.n}</span><span class="code t-${x.t}">${codeHtml(x, side === 'l' ? 'o' : 'n')}</span>` : '<span class="no"></span><span class="code none"></span>';
       if (l.t === 'ctx') { html += `<div class="df-row">${cell(l, 'l')}${cell(l, 'r')}</div>`; i++; count++; continue; }
-      let j = i; while (j < h.lines.length && h.lines[j].t === 'del') j++;
-      let k = j; while (k < h.lines.length && h.lines[k].t === 'add') k++;
+      let j = i; while (j < h.lines.length && h.lines[j]!.t === 'del') j++;
+      let k = j; while (k < h.lines.length && h.lines[k]!.t === 'add') k++;
       const dels = h.lines.slice(i, j), adds = h.lines.slice(j, k);
       for (let q = 0; q < Math.max(dels.length, adds.length); q++) {
         if (++count > DIFF_MAX_LINES) { cut = true; break; }
@@ -1129,16 +1189,16 @@ function renderDiff(f, r, whole){
 $('#dfBack').addEventListener('click', closeDiff);
 $('#dfPrev').addEventListener('click', () => stepDiff(-1));
 $('#dfNext').addEventListener('click', () => stepDiff(1));
-diffPane.querySelectorAll('[data-df-view]').forEach(b => b.addEventListener('click', () => {
+diffPane.querySelectorAll<HTMLElement>('[data-df-view]').forEach(b => b.addEventListener('click', () => {
   dfPrefs.split = b.dataset.dfView === 'split'; lsSet('lanes.diff', JSON.stringify(dfPrefs)); loadDiff();
 }));
-diffPane.querySelectorAll('[data-df-ctx]').forEach(b => b.addEventListener('click', () => {
+diffPane.querySelectorAll<HTMLElement>('[data-df-ctx]').forEach(b => b.addEventListener('click', () => {
   dfPrefs.full = b.dataset.dfCtx === 'full'; lsSet('lanes.diff', JSON.stringify(dfPrefs)); loadDiff();
 }));
 
 /* ---------- search ---------- */
 function runSearch(){
-  const q = $('#q').value.trim().toLowerCase();
+  const q = $<HTMLInputElement>('#q').value.trim().toLowerCase();
   matches = []; matchPtr = -1;
   if (q) S.commits.forEach((c, i) => { if (c.hay.includes(q)) matches.push(i); });
   matchSet = q ? new Set(matches) : null;
@@ -1153,10 +1213,10 @@ function runSearch(){
    one tab stop; the arrow keys move inside it. */
 const sideList = $('#sideList');
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
-let sideClosed = new Set(lsJSON('lanes.sideClosed', []));
-let sideFocus = null;        // data-key of the tree item holding the tab stop
-let sideWaiting = [];        // branch tips not loaded yet; the panel redraws once they are
-const sideBusy = new Set();  // tips jumpTo is still loading history for
+let sideClosed = new Set(lsJSON<string[]>('lanes.sideClosed', []));
+let sideFocus: string | null | undefined = null;   // data-key of the tree item holding the tab stop
+let sideWaiting: string[] = [];        // branch tips not loaded yet; the panel redraws once they are
+const sideBusy = new Set<string>();  // tips jumpTo is still loading history for
 const FOLDER_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 4v8.5h13V5.5H7.5L6 4z"/></svg>';
 const CHEVRON = '<span class="sb-chev"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg></span>';
 
@@ -1166,50 +1226,50 @@ const CHEVRON = '<span class="sb-chev"><svg width="10" height="10" viewBox="0 0 
    their labels; commits that a visible ref also reaches stay, as in
    GitKraken. The checked-out branch is never hidden. */
 const HIDDEN_KEY = 'lanes.hidden';
-const repoKey = path => path || (current ? current.path : 'browser:' + S.repo);
-function hiddenList(path){
-  const v = lsJSON(HIDDEN_KEY, {})[repoKey(path)];
-  return Array.isArray(v) ? v.filter(h => typeof h === 'string') : [];
+const repoKey = (path?: string) => path || (current ? current.path : 'browser:' + S.repo);
+// Saved lists come from localStorage: keep only string entries.
+const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((h): h is string => typeof h === 'string') : [];
+function hiddenList(path?: string){
+  return strings(lsJSON<Record<string, unknown>>(HIDDEN_KEY, {})[repoKey(path)]);
 }
-function saveHidden(list){
-  const all = lsJSON(HIDDEN_KEY, {});
+function saveHidden(list: string[]){
+  const all = lsJSON<Record<string, string[]>>(HIDDEN_KEY, {});
   if (list.length) all[repoKey()] = list; else delete all[repoKey()];
   lsSet(HIDDEN_KEY, JSON.stringify(all));
 }
-const coveredBy = (ref, list) => list.find(h => h === ref || (h.endsWith('/') && ref.startsWith(h)));
-function visibleRefs(r, list){
+const coveredBy = (ref: string, list: string[]) => list.find(h => h === ref || (h.endsWith('/') && ref.startsWith(h)));
+function visibleRefs(r: Refs, list: string[]): Refs{
   if (!list.length) return r;
   return { ...r, refs: r.refs.filter(([, n]) => n === r.headRef || n.startsWith('refs/tags/') || !coveredBy(n, list)) };
 }
-const isHiddenRef = (ref, list) => !!S.refs && ref !== S.refs.headRef && !!coveredBy(ref, list);
+const isHiddenRef = (ref: string, list: string[]) => !!S.refs && ref !== S.refs.headRef && !!coveredBy(ref, list);
 
 /* Solo: show only the chosen branches (same entry format, saved in
    lanes.solo). It wins over hidden. The walk then has no tags and no HEAD,
    so sync tips must come from the soloed refs alone: a tip outside the walk
    used as ^exclude would drop commits a soloed branch later merges in. */
 const SOLO_KEY = 'lanes.solo';
-function soloList(path){
-  const v = lsJSON(SOLO_KEY, {})[repoKey(path)];
-  return Array.isArray(v) ? v.filter(h => typeof h === 'string') : [];
+function soloList(path?: string){
+  return strings(lsJSON<Record<string, unknown>>(SOLO_KEY, {})[repoKey(path)]);
 }
-function saveSolo(list, path){
-  const all = lsJSON(SOLO_KEY, {});
+function saveSolo(list: string[], path?: string){
+  const all = lsJSON<Record<string, string[]>>(SOLO_KEY, {});
   if (list.length) all[repoKey(path)] = list; else delete all[repoKey(path)];
   lsSet(SOLO_KEY, JSON.stringify(all));
 }
 /* The refs the history walk starts from: their tips drive sync. */
-function walkRefs(r, hidden, solo){
+function walkRefs(r: Refs, hidden: string[], solo: string[]): Refs{
   if (!solo.length) return visibleRefs(r, hidden);
   const head = r.headRef && coveredBy(r.headRef, solo);
   return { refs: r.refs.filter(([, n]) => !n.startsWith('refs/tags/') && coveredBy(n, solo)),
            headRef: head ? r.headRef : null, headSha: head ? r.headSha : null };
 }
 /* The refs shown as labels: the walk, plus tags on whatever it shows. */
-function labelRefs(r, hidden, solo){
+function labelRefs(r: Refs, hidden: string[], solo: string[]): Refs{
   const w = walkRefs(r, hidden, solo);
   return solo.length ? { ...w, refs: w.refs.concat(r.refs.filter(([, n]) => n.startsWith('refs/tags/'))) } : w;
 }
-const shownRefs = () => S.refs ? walkRefs(S.refs, hiddenList(), soloList()) : { refs: [], headRef: null, headSha: null };
+const shownRefs = (): Refs => S.refs ? walkRefs(S.refs, hiddenList(), soloList()) : { refs: [], headRef: null, headSha: null };
 
 let hiddenGen = 0;           // bumped on every hide/solo change; a load or sync that saw an older list reloads
 function reloadForWalk(){
@@ -1220,45 +1280,49 @@ function reloadForWalk(){
 }
 // Toggles ref in a hide/solo list. Covered by a folder entry: drops that
 // entry (the whole folder comes back). Adding a folder drops entries inside it.
-function toggleIn(list, ref){
+function toggleIn(list: string[], ref: string){
   const cover = coveredBy(ref, list);
   if (cover) return list.filter(h => h !== cover);
   return [...list.filter(h => !(ref.endsWith('/') && h.startsWith(ref))), ref];
 }
-function toggleHidden(ref){ saveHidden(toggleIn(hiddenList(), ref)); reloadForWalk(); }
-function toggleSolo(ref){ saveSolo(toggleIn(soloList(), ref)); reloadForWalk(); }
+function toggleHidden(ref: string){ saveHidden(toggleIn(hiddenList(), ref)); reloadForWalk(); }
+function toggleSolo(ref: string){ saveSolo(toggleIn(soloList(), ref)); reloadForWalk(); }
 function showAllBranches(){ saveHidden([]); reloadForWalk(); }
 function exitSolo(){ saveSolo([]); reloadForWalk(); }
 
 /* Browser mode: hiding filters the pasted log down to what visible refs reach. */
-let browserData = null;
-function showBrowser({ raws, repo, sample, note = '', keep = false }){
+interface BrowserData { raws: Commit[]; repo: string; sample: boolean; note: string }
+let browserData: BrowserData | null = null;
+function showBrowser({ raws, repo, sample, note = '', keep = false }: Omit<BrowserData, 'note'> & { note?: string; keep?: boolean }){
   browserData = { raws, repo, sample, note };
   const remotes = guessRemotes(raws), refs = refsFromDec(raws, remotes);
   const hidden = hiddenList('browser:' + repo), solo = soloList('browser:' + repo);
   let list = raws;
   if (hidden.length || solo.length) {
-    const by = new Map(raws.map(c => [c.hash, c])), keepSet = new Set(), stack = [...tipsOf(walkRefs(refs, hidden, solo))];
+    const by = new Map(raws.map(c => [c.hash, c])), keepSet = new Set<string>(), stack = [...tipsOf(walkRefs(refs, hidden, solo))];
     while (stack.length) {
-      const h = stack.pop();
+      const h = stack.pop()!;
       if (keepSet.has(h) || !by.has(h)) continue;
-      keepSet.add(h); by.get(h).parents.forEach(p => stack.push(p));
+      keepSet.add(h); by.get(h)!.parents.forEach(p => stack.push(p));
     }
     list = raws.filter(c => keepSet.has(c.hash));
   }
   setData(list, repo, sample, { note, refs, remotes: [...remotes], hidden, solo, keep });
 }
 
-function branchList(){
-  const local = [], remote = new Map(); let detached = null;
-  const addRemote = (r, b) => { if (!remote.has(r)) remote.set(r, []); remote.get(r).push(b); };
+interface Branch { name: string; ref: string; sha: string; head?: boolean }
+type BranchList = { local: Branch[]; remote: Map<string, Branch[]>; detached: string | null };
+function branchList(): BranchList{
+  const local: Branch[] = [], remote = new Map<string, Branch[]>(); let detached: string | null = null;
+  const addRemote = (r: string, b: Branch) => { if (!remote.has(r)) remote.set(r, []); remote.get(r)!.push(b); };
   if (S.refs) {
+    const refs = S.refs;
     // Remote names can contain "/", so match the longest known one first.
-    const names = [...S.remotes].sort((a, b) => b.length - a.length);
-    S.refs.refs.forEach(([sha, ref]) => {
-      if (ref.startsWith('refs/heads/')) local.push({ name: ref.slice(11), ref, sha, head: ref === S.refs.headRef });
+    const names = [...S.remotes!].sort((a, b) => b.length - a.length);
+    refs.refs.forEach(([sha, ref]) => {
+      if (ref.startsWith('refs/heads/')) local.push({ name: ref.slice(11), ref, sha, head: ref === refs.headRef });
       else if (ref.startsWith('refs/remotes/')) {
-        const rest = ref.slice(13), r = names.find(n => rest.startsWith(n + '/')) || rest.split('/')[0];
+        const rest = ref.slice(13), r = names.find(n => rest.startsWith(n + '/')) || rest.split('/')[0]!;
         const name = rest.slice(r.length + 1);
         if (name && name !== 'HEAD') addRemote(r, { name, ref, sha });
       }
@@ -1270,22 +1334,22 @@ function branchList(){
 
 /* Browser mode has no upstream config: pair each local branch with the
    same name on origin (or any remote) and count over the loaded graph. */
-function guessTracking(list){
-  const out = new Map();
+function guessTracking(list: BranchList){
+  const out = new Map<string, Track>();
   if (S.commits.length > 50000) return out;
-  const reach = sha => {
-    const seen = new Set(), stack = [sha];
+  const reach = (sha: string) => {
+    const seen = new Set<string>(), stack = [sha];
     while (stack.length) {
-      const h = stack.pop();
+      const h = stack.pop()!;
       if (seen.has(h) || !S.idx.has(h)) continue;
-      seen.add(h); S.commits[S.idx.get(h)].parents.forEach(p => stack.push(p));
+      seen.add(h); S.commits[S.idx.get(h)!]!.parents.forEach(p => stack.push(p));
     }
     return seen;
   };
-  const remotes = [...list.remote.keys()].sort((a, b) => (b === 'origin') - (a === 'origin'));
+  const remotes = [...list.remote.keys()].sort((a, b) => +(b === 'origin') - +(a === 'origin'));
   list.local.forEach(b => {
-    let up = null;
-    for (const r of remotes) { up = list.remote.get(r).find(x => x.name === b.name); if (up) break; }
+    let up: Branch | null | undefined = null;
+    for (const r of remotes) { up = list.remote.get(r)!.find(x => x.name === b.name); if (up) break; }
     if (!up || !S.idx.has(b.sha) || !S.idx.has(up.sha)) return;   // e.g. one of them is hidden
     const A = reach(b.sha), B = reach(up.sha);
     let ahead = 0, behind = 0;
@@ -1301,18 +1365,18 @@ async function loadTracking(){
   if (!NATIVE || !current) return;
   const seq = ++trackSeq, path = current.path;
   try {
-    const list = await core.invoke('branch_tracking', { path });
+    const list = await invoke('branch_tracking', { path });
     if (seq !== trackSeq || !current || current.path !== path) return;
     S.track = new Map(list.map(t => [t.name, t]));
     renderSide();
   } catch (e) { /* the counts are extras; the panel works without them */ }
 }
 
-let sideHidden = [], sideSolo = [];   // hide/solo lists for the render in progress (read once per render)
+let sideHidden: string[] = [], sideSolo: string[] = [];   // hide/solo lists for the render in progress (read once per render)
 
 /* hideRef: the ref or "folder/" prefix the eye toggles; none for sections. */
-function sideNode(key, level, label, count, children, cls, hideRef){
-  const open = !!$('#bq').value.trim() || !sideClosed.has(key);
+function sideNode(key: string, level: number, label: string, count: number | null, children: string, cls: string, hideRef?: string){
+  const open = !!$<HTMLInputElement>('#bq').value.trim() || !sideClosed.has(key);
   const st = hideRef ? refState(hideRef, false) : 'shown', hidden = st === 'hidden' || st === 'out';
   return `<div role="treeitem" class="sb-node ${cls}${hidden ? ' is-hidden' : ''}${st === 'solo' ? ' is-solo' : ''}" aria-level="${level}" aria-expanded="${open}" data-key="${esc(key)}"${hideRef ? ` data-ref="${esc(hideRef)}"` : ''} tabindex="-1">`
     + `<div class="sb-row" style="--lvl:${level}">${CHEVRON}${label}${count == null ? '' : `<span class="sb-count">${count.toLocaleString('en')}</span>`}`
@@ -1322,31 +1386,33 @@ function sideNode(key, level, label, count, children, cls, hideRef){
 
 /* solo: in the solo set; out: solo is on and this is not in it;
    hidden / shown otherwise. The checked-out branch is never hidden. */
-function refState(ref, isHead){
+type RefState = 'solo' | 'out' | 'hidden' | 'shown';
+function refState(ref: string, isHead: boolean | undefined): RefState{
   if (sideSolo.length) return coveredBy(ref, sideSolo) ? 'solo' : 'out';
   return !isHead && coveredBy(ref, sideHidden) ? 'hidden' : 'shown';
 }
-function rowButtons(ref, st, canHide = true){
+function rowButtons(ref: string, st: RefState, canHide = true){
   const on = st === 'solo';
   const solo = `<span class="sb-solo${on ? ' on' : ''}" data-solo="${esc(ref)}" title="${on ? 'Leave solo (S)' : 'Solo: show only this (S)'}" aria-hidden="true">${ICON.solo}</span>`;
   return solo + (!sideSolo.length && canHide ? eyeBtn(ref, st === 'hidden') : '');
 }
-const refLabel = r => r.replace(/^refs\/(heads|remotes)\//, '');
-function eyeBtn(ref, hidden){
+const refLabel = (r: string) => r.replace(/^refs\/(heads|remotes)\//, '');
+function eyeBtn(ref: string, hidden: boolean){
   const cover = hidden && coveredBy(ref, sideHidden);
   let title = 'Hide from the graph (H)';
-  if (hidden) title = cover === ref ? 'Show in the graph (H)' : `Hidden with ${refLabel(cover)}. Click to show it again (H)`;
+  // hidden comes from refState, so some entry covers ref.
+  if (hidden) title = cover === ref ? 'Show in the graph (H)' : `Hidden with ${refLabel(cover as string)}. Click to show it again (H)`;
   return `<span class="sb-eye${hidden ? ' on' : ''}" data-hide="${esc(ref)}" title="${esc(title)}" aria-hidden="true">${hidden ? ICON.eyeOff : ICON.eye}</span>`;
 }
 
-function sideLeaf(b, label, level, track){
+function sideLeaf(b: Branch, label: string, level: number, track: Map<string, Track>){
   const i = S.idx.get(b.sha), loaded = i !== undefined;
   const canHide = !b.head && b.ref !== 'HEAD', canSolo = b.ref !== 'HEAD';
   const st = canSolo ? refState(b.ref, b.head) : (sideSolo.length ? 'out' : 'shown'), hidden = st === 'hidden' || st === 'out';
   const shown = loaded && !hidden;
   if (!loaded && !hidden) sideWaiting.push(b.sha);
   const mark = b.head ? `<span class="sb-head">${ICON.check}</span>`
-    : `<span class="sb-dot${shown ? '' : ' off'}"${shown ? ` style="--c:${laneCol(S.commits[i].color)}"` : ''}></span>`;
+    : `<span class="sb-dot${shown ? '' : ' off'}"${shown ? ` style="--c:${laneCol(S.commits[i!]!.color)}"` : ''}></span>`;
   const t = track.get(b.ref.startsWith('refs/heads/') ? b.name : '');
   const up = t ? t.upstream.replace(/^refs\/(remotes|heads)\//, '') : '';
   let badge = '', tip = b.ref;
@@ -1365,19 +1431,21 @@ function sideLeaf(b, label, level, track){
 }
 
 /* Folders and branches sorted together by name, like a file tree. */
-function sideTree(items, level, key, track, prefix){
-  const root = { dirs: new Map(), leaves: [], n: 0 };
+interface TreeNode { dirs: Map<string, TreeNode>; leaves: Branch[]; n: number }
+type TreeEntry = { name: string; d: TreeNode; b?: undefined } | { name: string; b: Branch; d?: undefined };
+function sideTree(items: Branch[], level: number, key: string, track: Map<string, Track>, prefix: string){
+  const root: TreeNode = { dirs: new Map(), leaves: [], n: 0 };
   items.forEach(b => {
     let n = root; n.n++;
     b.name.split('/').slice(0, -1).forEach(p => {
       if (!n.dirs.has(p)) n.dirs.set(p, { dirs: new Map(), leaves: [], n: 0 });
-      n = n.dirs.get(p); n.n++;
+      n = n.dirs.get(p)!; n.n++;
     });
     n.leaves.push(b);
   });
-  const walk = (n, level, key, dir) => [
-    ...[...n.dirs].map(([name, d]) => ({ name, d })),
-    ...n.leaves.map(b => ({ name: b.name.slice(b.name.lastIndexOf('/') + 1), b })),
+  const walk = (n: TreeNode, level: number, key: string, dir: string): string => [
+    ...[...n.dirs].map(([name, d]): TreeEntry => ({ name, d })),
+    ...n.leaves.map((b): TreeEntry => ({ name: b.name.slice(b.name.lastIndexOf('/') + 1), b })),
   ].sort((x, y) => collator.compare(x.name, y.name)).map(e => e.b
     ? sideLeaf(e.b, e.name, level, track)
     : sideNode(`${key}/${e.name}`, level, `<span class="sb-ic">${FOLDER_ICON}</span><span class="sb-name">${esc(e.name)}</span>`, e.d.n,
@@ -1390,10 +1458,11 @@ function renderSide(){
   sideHidden = hiddenList(); sideSolo = soloList();
   const list = branchList();
   const track = NATIVE ? (S.track || new Map()) : guessTracking(list);
-  const q = $('#bq').value.trim().toLowerCase();
-  const hit = b => !q || b.name.toLowerCase().includes(q);
-  const focused = sideList.contains(document.activeElement) ? document.activeElement.dataset.key : null;
-  const empty = (level, text) => `<div class="sb-empty" role="none" style="--lvl:${level}">${text}</div>`;
+  const q = $<HTMLInputElement>('#bq').value.trim().toLowerCase();
+  const hit = (b: Branch) => !q || b.name.toLowerCase().includes(q);
+  // Tree items are HTML elements, so a focused one has a dataset.
+  const focused = sideList.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : null;
+  const empty = (level: number, text: string) => `<div class="sb-empty" role="none" style="--lvl:${level}">${text}</div>`;
   sideWaiting = [];
 
   const local = list.local.filter(hit);
@@ -1403,8 +1472,8 @@ function renderSide(){
   const localCount = local.length + (list.detached ? 1 : 0);
 
   let remoteHtml = '', remoteCount = 0;
-  [...list.remote.keys()].sort((a, b) => (b === 'origin') - (a === 'origin') || collator.compare(a, b)).forEach(r => {
-    const items = list.remote.get(r).filter(hit);
+  [...list.remote.keys()].sort((a, b) => +(b === 'origin') - +(a === 'origin') || collator.compare(a, b)).forEach(r => {
+    const items = list.remote.get(r)!.filter(hit);
     if (q && !items.length) return;
     remoteCount += items.length;
     remoteHtml += sideNode(`R:${r}`, 2, `<span class="sb-ic">${ICON.cloud}</span><span class="sb-name">${esc(r)}</span>`, items.length,
@@ -1430,7 +1499,7 @@ function renderSide(){
     : nn + (n === 1 ? ' branch is' : ' branches are') + ' hidden from the graph';
   $('#showAllBtn').textContent = sideSolo.length ? 'Exit solo' : 'Show all';
 
-  const items = [...sideList.querySelectorAll('[role="treeitem"]')];
+  const items = [...sideList.querySelectorAll<HTMLElement>('[role="treeitem"]')];
   const keep = items.find(el => el.dataset.key === (focused || sideFocus)) || items[0];
   if (keep) { keep.tabIndex = 0; sideFocus = keep.dataset.key; if (focused) keep.focus({ preventScroll: true }); }
 }
@@ -1447,11 +1516,11 @@ function markSide(){
 
 /* Selects a branch tip; on desktop keeps loading pages until it is in view. */
 let jumpSeq = 0;
-async function jumpTo(sha, { detail: show = true } = {}){
+async function jumpTo(sha: string, { detail: show = true }: { detail?: boolean } = {}){
   const seq = ++jumpSeq;
   if (!S.idx.has(sha) && NATIVE && S.more) {
     // By SHA, not element: pages arriving meanwhile redraw the panel.
-    const mark = on => { sideBusy[on ? 'add' : 'delete'](sha); sideList.querySelectorAll(`.sb-leaf[data-sha="${CSS.escape(sha)}"]`).forEach(x => x.classList.toggle('busy', on)); };
+    const mark = (on: boolean) => { sideBusy[on ? 'add' : 'delete'](sha); sideList.querySelectorAll(`.sb-leaf[data-sha="${CSS.escape(sha)}"]`).forEach(x => x.classList.toggle('busy', on)); };
     mark(true);
     let stalls = 0;
     while (!S.idx.has(sha) && S.more && seq === jumpSeq) {
@@ -1477,7 +1546,7 @@ async function jumpTo(sha, { detail: show = true } = {}){
    tree edits do not touch .git, so the ref fingerprint cannot see them;
    work_status is polled on its own, slower when status is slow. */
 const WIP_EVERY = 4000;
-let wip = { path: null, files: [], total: 0, sig: '' }, wipSeq = 0, wipNext = 0, wipBusy = false;
+let wip: { path: string | null; files: WorkFile[]; total: number; sig: string } = { path: null, files: [], total: 0, sig: '' }, wipSeq = 0, wipNext = 0, wipBusy = false;
 let wipSel = false;          // the WIP row is selected (sel is then -1)
 let rowOff = 0;              // px above row 0: ROW_H while the WIP row shows
 const wipRow = document.createElement('div');
@@ -1485,18 +1554,19 @@ wipRow.className = 'row wip-row';
 wipRow.hidden = true;
 
 const wipOn = () => NATIVE && !!current && wip.path === current.path && wip.total > 0 && S.commits.length > 0;
-function wipHead(){
+function wipHead(): number{
   const h = S.refs && S.refs.headSha && S.idx.get(S.refs.headSha);
-  return h === undefined || h === null || h === false ? -1 : h;
+  // headSha is null or a full SHA (never ''), so h is a row index here.
+  return h === undefined || h === null ? -1 : h as number;
 }
 
-async function loadWip({ force = false } = {}){
+async function loadWip({ force = false }: { force?: boolean } = {}){
   if (!NATIVE || !current || document.hidden || wipBusy) return;
   if (!force && Date.now() < wipNext) return;
   wipBusy = true;
   const seq = ++wipSeq, path = current.path, t0 = performance.now();
   try {
-    const r = await core.invoke('work_status', { path });
+    const r = await invoke('work_status', { path });
     if (seq === wipSeq && current && current.path === path) applyWip(path, r);
   } catch (e) { /* keep the last state; the next poll tries again */ }
   finally {
@@ -1506,25 +1576,25 @@ async function loadWip({ force = false } = {}){
   }
 }
 
-function wipKind(f){
+function wipKind(f: WorkFile){
   if (f.conflict) return 'conflict';
   if (f.staged === 'A' || f.unstaged === '?') return 'add';
   if (f.staged === 'D' || f.unstaged === 'D') return 'del';
   return 'mod';
 }
-function applyWip(path, r){
+function applyWip(path: string, r: WorkStatus){
   const sig = r.total + '|' + r.files.map(f => `${f.staged}${f.unstaged}${f.conflict ? '!' : ''} ${f.oldPath || ''}>${f.path}`).join('|');
   if (wip.path === path && wip.sig === sig) { refreshWipDiff(); return; }
   wip = { path, files: r.files, total: r.total, sig };
   const n = { mod: 0, add: 0, del: 0, conflict: 0 };
   r.files.forEach(f => n[wipKind(f)]++);
-  const chip = (k, icon, label) => n[k] ? `<span class="wip-n ${k}" title="${n[k]} ${label}">${icon}${n[k]}</span>` : '';
+  const chip = (k: keyof typeof n, icon: string, label: string) => n[k] ? `<span class="wip-n ${k}" title="${n[k]} ${label}">${icon}${n[k]}</span>` : '';
   wipRow.innerHTML = '<div class="col-ref"></div><div class="col-graph"></div>'
     + `<div class="col-msg"><span class="wip-label">// WIP</span>${chip('mod', ICON.pencil, 'modified')}${chip('add', '+', 'added')}${chip('del', '−', 'deleted')}${chip('conflict', '!', 'conflicted')}</div><div class="col-date"></div>`;
   wipRow.title = r.total === 1 ? '1 file changed, not committed' : r.total.toLocaleString('en') + ' files changed, not committed';
   placeRows();
   if (detailFor && detailFor.card === 'wip') {
-    if (wipOn()) { wipCard(); if (diffOpen() && dfList[dfAt] && dfList[dfAt].kind === 'wip') { syncDiffList(); diffNav(); refreshWipDiff(); } }
+    if (wipOn()) { wipCard(); if (diffOpen() && dfList[dfAt]?.kind === 'wip') { syncDiffList(); diffNav(); refreshWipDiff(); } }
     else { const h = wipHead(); select(h >= 0 ? h : 0); }   // everything was committed or reverted
   }
   scheduleDraw();
@@ -1547,9 +1617,9 @@ function placeRows(){
   if (!on && wipSel) { wipSel = false; wipRow.classList.remove('sel'); }
 }
 
-function selectWip({ open = false } = {}){
+function selectWip({ open = false }: { open?: boolean } = {}){
   if (!wipOn()) return;
-  if (pool.has(sel)) pool.get(sel).classList.remove('sel');
+  pool.get(sel)?.classList.remove('sel');
   sel = -1; wipSel = true;
   wipRow.classList.add('sel');
   wipCard();
@@ -1558,7 +1628,7 @@ function selectWip({ open = false } = {}){
   scheduleDraw();
 }
 
-function wipFile(f, side, i){
+function wipFile(f: WorkFile, side: 's' | 'u', i: number){
   const st = f.conflict ? '!' : side === 's' ? f.staged : f.unstaged;
   const cls = st === '?' ? 'A' : st === '!' ? 'D' : st;
   const slash = f.path.lastIndexOf('/');
@@ -1575,13 +1645,13 @@ function wipCard(){
   const conflicts = files.filter(f => f.conflict).length;
   // One list for diff navigation: unstaged first, then staged, as shown.
   panelFiles = [];
-  const entry = (f, side) => {
-    const kind = f.conflict ? 'conflict' : side === 's' ? 'staged' : f.unstaged === '?' ? 'untracked' : 'unstaged';
+  const entry = (f: WorkFile, side: 's' | 'u') => {
+    const kind: WipSide = f.conflict ? 'conflict' : side === 's' ? 'staged' : f.unstaged === '?' ? 'untracked' : 'unstaged';
     const status = f.conflict ? '!' : side === 's' ? f.staged : f.unstaged === '?' ? 'A' : f.unstaged;
     panelFiles.push({ kind: 'wip', side: kind, path: f.path, oldPath: side === 's' ? f.oldPath : null, status });
     return panelFiles.length - 1;
   };
-  const part = (title, list, side) => `<div class="d-files"><div class="d-files-head"><span>${title} (${list.length.toLocaleString('en')})</span></div>`
+  const part = (title: string, list: WorkFile[], side: 's' | 'u') => `<div class="d-files"><div class="d-files-head"><span>${title} (${list.length.toLocaleString('en')})</span></div>`
     + (list.length ? `<ul class="d-file-list">${list.map(f => wipFile(f, side, entry(f, side))).join('')}</ul>` : '<p class="muted">None</p>') + '</div>';
   detail.innerHTML =
     '<div class="d-top"><span class="k">Work in progress</span><button class="btn icon-btn sm d-close" aria-label="Close details">✕</button></div>'
@@ -1598,14 +1668,15 @@ function wipCard(){
    Kept per repository outside S, which is rebuilt on every reload. Clicking
    one puts its card in the detail panel and moves the graph to the commit
    it belongs to, without replacing the card. */
-let stashes = [], stashPath = null, stashSeq = 0;
+type StashItem = Stash & { card: 'stash'; key: string };
+let stashes: StashItem[] = [], stashPath: string | null = null, stashSeq = 0;
 async function loadStashes(){
   if (!NATIVE || !current) return;
   const seq = ++stashSeq, path = current.path;
   try {
-    const list = await core.invoke('list_stashes', { path });
+    const list = await invoke('list_stashes', { path });
     if (seq !== stashSeq || !current || current.path !== path) return;
-    stashes = list.map(st => ({ ...st, card: 'stash', key: 'S:' + st.sha }));
+    stashes = list.map(st => ({ ...st, card: 'stash' as const, key: 'S:' + st.sha }));
     stashPath = path;
     placeStashes();
     refreshCard();
@@ -1614,10 +1685,10 @@ async function loadStashes(){
 }
 
 // "On main: message" -> message; "WIP on main: 1a2b3c4 subject" -> WIP on main
-function stashLabel(st){
+function stashLabel(st: Stash){
   const m = st.message.match(/^(WIP on|On) ([^:]*): ([\s\S]*)$/);
   if (!m) return { label: st.message, branch: '' };
-  return { label: m[1] === 'On' ? m[3] : `WIP on ${m[2]}`, branch: m[2] };
+  return { label: m[1] === 'On' ? m[3]! : `WIP on ${m[2]}`, branch: m[2]! };
 }
 
 /* Stash rows: each stash also sits in the graph as its own row above the
@@ -1626,9 +1697,10 @@ function stashLabel(st){
    redone, but only when the set of stashes whose base is loaded changes:
    after the stash list changes, after a full reload, and when a new page
    brings in a stash's base. Returns 'relayout', 'names' or false. */
-function stashRowOf(st){
-  return { hash: st.sha, parents: [st.parents[0]], author: 'Stash', email: '', time: st.time, ctime: st.time,
-           subject: stashLabel(st).label, dec: '', stashRow: true, stashKey: st.key, stashName: st.name };
+// A stash always has its base as first parent. Row fields come from prepCommit/layoutRows.
+function stashRowOf(st: StashItem){
+  return { hash: st.sha, parents: [st.parents[0]!], author: 'Stash', email: '', time: st.time, ctime: st.time,
+           subject: stashLabel(st).label, dec: '', stashRow: true, stashKey: st.key, stashName: st.name } as Commit;
 }
 /* Gives each stash row the first lane right of its base commit that is free
    on every row between the two (no node, no other line), so it sits beside
@@ -1639,8 +1711,9 @@ function laneStashes(){
   const n = S.commits.length;
   S.commits.forEach((c, s) => {
     if (!c.stashRow) return;
-    const b = S.idx.get(c.parents[0]), base = S.commits[b], taken = new Set();
-    for (let r = s; r <= b; r++) if (!S.commits[r].stashRow) taken.add(S.commits[r].lane);
+    // Stash rows are placed only when their base commit is loaded (placeStashes).
+    const b = S.idx.get(c.parents[0]!)!, base = S.commits[b]!, taken = new Set<number>();
+    for (let r = s; r <= b; r++) if (!S.commits[r]!.stashRow) taken.add(S.commits[r]!.lane);
     for (const e of S.edges) {
       const t = e.to >= 0 ? e.to : n;
       if (t < s || e.from > b) continue;
@@ -1653,16 +1726,16 @@ function laneStashes(){
     c.lane = x; c.color = -1;
     S.edges.push({ from: s, fromLane: x, lane: x, to: b, toLane: base.lane, color: -1 });
     base.children.push(s);
-    if (x > S.stashLaneMax) S.stashLaneMax = x;
+    if (x > S.stashLaneMax!) S.stashLaneMax = x;   // set to 0 above
   });
 }
 
-function placeStashes({ render: redraw = true } = {}){
+function placeStashes({ render: redraw = true }: { render?: boolean } = {}){
   if (!NATIVE || !S.commits.length) return false;
   const list = current && stashPath === current.path ? stashes : [];
-  const want = list.filter(st => { const i = S.idx.get(st.parents[0]); return i !== undefined && !S.commits[i].stashRow; });
+  const want = list.filter(st => { const i = S.idx.get(st.parents[0]!); return i !== undefined && !S.commits[i]!.stashRow; });
   const have = S.commits.filter(c => c.stashRow);
-  const ids = a => a.map(x => x.sha || x.hash).sort().join();
+  const ids = (a: (StashItem | Commit)[]) => a.map(x => 'sha' in x ? x.sha : x.hash).sort().join();
   if (ids(want) === ids(have)) {
     // Same stashes; only stash@{n} may have shifted after a push or pop.
     let renamed = false;
@@ -1670,22 +1743,23 @@ function placeStashes({ render: redraw = true } = {}){
     if (renamed && redraw) { for (const el of pool.values()) el.remove(); pool.clear(); scheduleDraw(); }
     return renamed ? 'names' : false;
   }
-  const keepHash = S.commits[sel] ? S.commits[sel].hash : null;
+  const keepHash = S.commits[sel]?.hash ?? null;
   const anchor = scrollAnchor(), top = wrap.scrollTop, left = wrap.scrollLeft;
   const real = S.commits.filter(c => !c.stashRow);
-  const rows = want.map(stashRowOf).sort((x, y) => y.ctime - x.ctime);
+  const rows = want.map(stashRowOf).sort((x, y) => y.ctime! - x.ctime!);
   S.commits = mergeNew(rows, real, new Map(real.map((c, i) => [c.hash, i])));
   S.idx = new Map(S.commits.map((c, i) => [c.hash, i]));
   rows.forEach(prepCommit);
   S.edges = []; S.lay = newLayout();
   layoutRows(S.lay, S.commits, 0, S.idx, S.edges);
   laneStashes();
-  S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax); S.stashRows = rows.length;
+  S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax!); S.stashRows = rows.length;
   if (redraw) render(keepHash, { top: anchoredTop(anchor, top), left });
   return 'relayout';
 }
 
-function stashSection(q, empty){
+type EmptyRow = (level: number, text: string) => string;
+function stashSection(q: string, empty: EmptyRow){
   const list = current && stashPath === current.path ? stashes : [];
   const items = list.filter(st => !q || `${st.name} ${st.message}`.toLowerCase().includes(q));
   const html = items.map(st => {
@@ -1698,7 +1772,7 @@ function stashSection(q, empty){
     html || empty(2, q ? 'No matches' : 'No stashes'), 'sb-sec');
 }
 
-function showStash(key){
+function showStash(key: string){
   const st = stashes.find(x => x.key === key); if (!st) return;
   stashCard(st);
   if (narrowView()) detail.classList.add('open');
@@ -1706,12 +1780,12 @@ function showStash(key){
   // that was later rebased away is in no branch, so searching for it would
   // read the whole history for nothing.
   if (S.idx.has(st.sha)) jumpTo(st.sha, { detail: false });   // its own row in the graph
-  else if (S.idx.has(st.parents[0])) jumpTo(st.parents[0], { detail: false });
+  else if (S.idx.has(st.parents[0]!)) jumpTo(st.parents[0]!, { detail: false });
   else markSide();
 }
-function stashCard(st){
+function stashCard(st: StashItem){
   const base = st.parents[0], { label, branch } = stashLabel(st);
-  const c = { card: 'stash', stash: true, key: st.key, hash: st.sha, parents: st.parents };
+  const c: Extract<Card, { card: 'stash' }> = { card: 'stash', stash: true, key: st.key, hash: st.sha, parents: st.parents };
   detailFor = c;
   detail.innerHTML =
     `<div class="d-top"><span class="k">Stash</span><code>${esc(st.name)}</code><button class="btn sm" data-copy="${esc(st.sha)}">Copy SHA</button><button class="btn icon-btn sm d-close" aria-label="Close details">✕</button></div>`
@@ -1732,17 +1806,21 @@ function stashCard(st){
 function refreshCard(){
   const d = detailFor; if (!d || !d.card) return;
   const now = d.card === 'stash' ? stashes.find(x => x.key === d.key) : prs.items.find(x => x.key === d.key);
-  if (!now) { if (S.commits[sel]) renderDetail(S.commits[sel]); else { detailFor = null; detail.innerHTML = ''; } }
-  else if (d.card === 'stash') stashCard(now);
-  else prCard(now);
+  const cur = S.commits[sel];
+  if (!now) { if (cur) renderDetail(cur); else { detailFor = null; detail.innerHTML = ''; } }
+  // now came from the list that matches d.card.
+  else if (d.card === 'stash') stashCard(now as StashItem);
+  else prCard(now as PrItem);
 }
 
-let prs = { path: null, state: 'idle', items: [], repo: null, error: '', at: 0 };
+type PrItem = PullRequest & { card: 'pr'; key: string };
+interface PrState { path: string | null; state: 'idle' | 'loading' | 'ok' | 'none' | 'error'; items: PrItem[]; repo: string | null; error: string; at: number }
+let prs: PrState = { path: null, state: 'idle', items: [], repo: null, error: '', at: 0 };
 let prSeq = 0;
 const PR_EVERY = 5 * 60e3;   // pull requests change on the server; ask again this often
 /* minAge: skip if the list is newer than this. A sync (commit, fetch, a new
    remote URL) asks sooner than the timer, a manual refresh (force) always. */
-async function loadPrs({ force = false, minAge = PR_EVERY } = {}){
+async function loadPrs({ force = false, minAge = PR_EVERY }: { force?: boolean; minAge?: number } = {}){
   if (!NATIVE || !current) return;
   const path = current.path;
   if (prs.path !== path) prs = { path, state: 'loading', items: [], repo: null, error: '', at: 0 };
@@ -1751,10 +1829,10 @@ async function loadPrs({ force = false, minAge = PR_EVERY } = {}){
   prs.at = Date.now();
   if (prs.state === 'loading') renderSide();
   try {
-    const r = await core.invoke('pull_requests', { path });
+    const r = await invoke('pull_requests', { path });
     if (seq !== prSeq || prs.path !== path) return;
     prs = { ...prs, state: r.repo ? 'ok' : 'none', repo: r.repo, error: '',
-            items: r.items.map(p => ({ ...p, card: 'pr', key: 'PR:' + p.id })) };
+            items: r.items.map(p => ({ ...p, card: 'pr' as const, key: 'PR:' + p.id })) };
     refreshCard();
   } catch (e) {
     if (seq !== prSeq || prs.path !== path) return;
@@ -1763,20 +1841,20 @@ async function loadPrs({ force = false, minAge = PR_EVERY } = {}){
   renderSide();
 }
 
-const shortRef = r => r.replace(/^refs\/heads\//, '');
-const colorOf = s => { let h = 0; for (const ch of s) h = (h * 31 + ch.codePointAt(0)) | 0; return Math.abs(h) % PALETTE.length; };
-const VOTE = { 10: 'Approved', 5: 'Approved with suggestions', 0: 'No vote', '-5': 'Waiting for author', '-10': 'Rejected' };
-function prVotes(p){
-  const n = f => p.reviewers.filter(r => f(r.vote)).length;
-  return [[n(v => v >= 5), 'approved'], [n(v => v === -5), 'waiting for author'], [n(v => v <= -10), 'rejected']]
+const shortRef = (r: string) => r.replace(/^refs\/heads\//, '');
+const colorOf = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.codePointAt(0)!) | 0; return Math.abs(h) % PALETTE.length; };
+const VOTE: Record<number, string> = { 10: 'Approved', 5: 'Approved with suggestions', 0: 'No vote', '-5': 'Waiting for author', '-10': 'Rejected' };
+function prVotes(p: PrItem){
+  const n = (f: (v: number) => boolean) => p.reviewers.filter(r => f(r.vote)).length;
+  return ([[n(v => v >= 5), 'approved'], [n(v => v === -5), 'waiting for author'], [n(v => v <= -10), 'rejected']] as [number, string][])
     .filter(([k]) => k).map(([k, t]) => `${k} ${t}`).join(', ');
 }
-function avatar(name, cls){
+function avatar(name: string, cls: string){
   const k = colorOf(name);
   return `<span class="${cls}" style="background:${PALETTE[k]};color:${ON_COL[k]}">${esc(initials(name))}</span>`;
 }
 
-function prSection(q, empty){
+function prSection(q: string, empty: EmptyRow){
   const mine = current && prs.path === current.path;
   const items = (mine ? prs.items : []).filter(p => !q || `#${p.id} ${p.title} ${p.author} ${p.source}`.toLowerCase().includes(q));
   let body = '';
@@ -1799,38 +1877,38 @@ function prSection(q, empty){
 /* The source branch as fetched (origin first, then other remotes, then a
    local branch of the same name), else the PR's last pushed commit if it is
    already loaded. Never an unloaded commit: it may not be in the repo at all. */
-function prTip(p){
+function prTip(p: PrItem): string | null{
   const name = shortRef(p.source), refs = shownRefs().refs;
-  const find = full => { const r = refs.find(([, n]) => n === full); return r && r[0]; };
-  const remotes = [...S.remotes].sort((a, b) => (b === 'origin') - (a === 'origin'));
+  const find = (full: string) => { const r = refs.find(([, n]) => n === full); return r && r[0]; };
+  const remotes = [...S.remotes!].sort((a, b) => +(b === 'origin') - +(a === 'origin'));
   return remotes.map(r => find(`refs/remotes/${r}/${name}`)).find(Boolean) || find(`refs/heads/${name}`)
     || (p.sourceSha && S.idx.has(p.sourceSha) ? p.sourceSha : null);
 }
 
 /* The PR's source branch exists here but every copy of it is hidden. */
-function srcHidden(src){
+function srcHidden(src: string){
   if (!S.refs) return false;
   const have = new Set(S.refs.refs.map(([, n]) => n)), shown = new Set(shownRefs().refs.map(([, n]) => n));
-  const names = [`refs/heads/${src}`, ...[...S.remotes].map(r => `refs/remotes/${r}/${src}`)].filter(n => have.has(n));
+  const names = [`refs/heads/${src}`, ...[...S.remotes!].map(r => `refs/remotes/${r}/${src}`)].filter(n => have.has(n));
   return names.length > 0 && names.every(n => !shown.has(n));
 }
 
-function showPr(key){
+function showPr(key: string){
   const p = prs.items.find(x => x.key === key); if (!p) return;
   const tip = prCard(p);
   if (narrowView()) detail.classList.add('open');
   if (tip) jumpTo(tip, { detail: false }); else markSide();
 }
-function prCard(p){
+function prCard(p: PrItem){
   detailFor = { card: 'pr', key: p.key };
   const created = Date.parse(p.created) / 1000, tip = prTip(p);
   const src = shortRef(p.source), dst = shortRef(p.target);
-  const at = tip !== null && S.idx.has(tip) ? laneCol(S.commits[S.idx.get(tip)].color) : PALETTE[1];
+  const at = tip !== null && S.idx.has(tip) ? laneCol(S.commits[S.idx.get(tip)!]!.color) : PALETTE[1];
   const badges = [p.draft ? '<span class="d-badge">Draft</span>' : '',
     p.mergeStatus === 'conflicts' ? '<span class="d-badge warn">Merge conflicts</span>' : '',
     p.mergeStatus === 'rejectedByPolicy' ? '<span class="d-badge warn">Blocked by policy</span>' : ''].join('');
   // Groups come as "[Project]\Team"; the team name is enough.
-  const who = n => n.replace(/^\[[^\]]*\]\\/, '');
+  const who = (n: string) => n.replace(/^\[[^\]]*\]\\/, '');
   const reviewers = p.reviewers.length
     ? `<ul class="d-reviewers">${p.reviewers.map(r => `<li>${avatar(who(r.name), 'sb-av')}<span class="n" title="${esc(r.name)}">${esc(who(r.name))}</span><span class="v v${r.vote}">${esc(VOTE[r.vote] || 'No vote')}</span></li>`).join('')}</ul>`
     : '<span class="muted">None</span>';
@@ -1849,50 +1927,52 @@ function prCard(p){
   return tip;
 }
 
-function sideToggle(el, open = el.getAttribute('aria-expanded') !== 'true'){
+// Tree items always carry data-key; branch leaves also data-sha, and the eye/solo buttons their ref.
+function sideToggle(el: HTMLElement, open = el.getAttribute('aria-expanded') !== 'true'){
   el.setAttribute('aria-expanded', String(open));
-  if ($('#bq').value.trim()) return;   // filtering opens everything; don't remember that
-  if (open) sideClosed.delete(el.dataset.key); else sideClosed.add(el.dataset.key);
+  if ($<HTMLInputElement>('#bq').value.trim()) return;   // filtering opens everything; don't remember that
+  if (open) sideClosed.delete(el.dataset.key!); else sideClosed.add(el.dataset.key!);
   lsSet('lanes.sideClosed', JSON.stringify([...sideClosed]));
 }
-function sideActivate(el){
+function sideActivate(el: HTMLElement){
   const kind = el.dataset.kind;
   if (kind) closeDiff();   // the graph is about to move: show it
   // A hidden or out-of-solo tip is usually not in the graph; jump only if it is loaded anyway.
-  if (kind === 'branch') { if (!el.classList.contains('is-hidden') || S.idx.has(el.dataset.sha)) jumpTo(el.dataset.sha); }
-  else if (kind === 'stash') showStash(el.dataset.key);
-  else if (kind === 'pr') showPr(el.dataset.key);
+  if (kind === 'branch') { if (!el.classList.contains('is-hidden') || S.idx.has(el.dataset.sha!)) jumpTo(el.dataset.sha!); }
+  else if (kind === 'stash') showStash(el.dataset.key!);
+  else if (kind === 'pr') showPr(el.dataset.key!);
   else sideToggle(el);
 }
-function sideMoveTo(el, focus = true){
+function sideMoveTo(el: HTMLElement | null | undefined, focus = true){
   if (!el) return;
-  sideList.querySelectorAll('[role="treeitem"][tabindex="0"]').forEach(x => { x.tabIndex = -1; });
+  sideList.querySelectorAll<HTMLElement>('[role="treeitem"][tabindex="0"]').forEach(x => { x.tabIndex = -1; });
   el.tabIndex = 0; sideFocus = el.dataset.key; if (focus) el.focus();
 }
-const sideVisible = () => [...sideList.querySelectorAll('[role="treeitem"]')]
-  .filter(el => !el.parentElement.closest('[aria-expanded="false"]'));
+const sideVisible = () => [...sideList.querySelectorAll<HTMLElement>('[role="treeitem"]')]
+  .filter(el => !el.parentElement!.closest('[aria-expanded="false"]'));
 
 sideList.addEventListener('click', e => {
-  const row = e.target.closest('.sb-row'); if (!row) return;
-  const el = row.parentElement;
+  const t = e.target as Element;
+  const row = t.closest('.sb-row'); if (!row) return;
+  const el = row.parentElement!;   // the tree item
   sideMoveTo(el);
-  const eye = e.target.closest('[data-hide]'), solo = e.target.closest('[data-solo]');
-  if (eye) toggleHidden(eye.dataset.hide);
-  else if (solo) toggleSolo(solo.dataset.solo);
+  const eye = t.closest<HTMLElement>('[data-hide]'), solo = t.closest<HTMLElement>('[data-solo]');
+  if (eye) toggleHidden(eye.dataset.hide!);
+  else if (solo) toggleSolo(solo.dataset.solo!);
   else sideActivate(el);
 });
 $('#showAllBtn').addEventListener('click', () => (soloList().length ? exitSolo() : showAllBranches()));
 sideList.addEventListener('keydown', e => {
-  const el = e.target.closest('[role="treeitem"]'); if (!el) return;
+  const el = (e.target as Element).closest<HTMLElement>('[role="treeitem"]'); if (!el) return;
   const vis = sideVisible(), k = vis.indexOf(el);
   const isNode = el.hasAttribute('aria-expanded'), open = el.getAttribute('aria-expanded') === 'true';
-  const parent = el.parentElement.closest('[role="treeitem"]');
+  const parent = el.parentElement!.closest<HTMLElement>('[role="treeitem"]');
   let done = true;
   if (e.key === 'ArrowDown') sideMoveTo(vis[k + 1]);
   else if (e.key === 'ArrowUp') sideMoveTo(vis[k - 1]);
   else if (e.key === 'Home') sideMoveTo(vis[0]);
   else if (e.key === 'End') sideMoveTo(vis[vis.length - 1]);
-  else if (e.key === 'ArrowRight') { if (isNode && !open) sideToggle(el, true); else if (isNode) sideMoveTo(el.querySelector('[role="treeitem"]')); }
+  else if (e.key === 'ArrowRight') { if (isNode && !open) sideToggle(el, true); else if (isNode) sideMoveTo(el.querySelector<HTMLElement>('[role="treeitem"]')); }
   else if (e.key === 'ArrowLeft') { if (isNode && open) sideToggle(el, false); else sideMoveTo(parent); }
   else if (e.key === 'Enter' || e.key === ' ') sideActivate(el);
   else if (e.ctrlKey || e.metaKey || e.altKey || !el.dataset.ref) done = false;
@@ -1904,18 +1984,21 @@ sideList.addEventListener('keydown', e => {
 });
 $('#bq').addEventListener('input', renderSide);
 $('#bq').addEventListener('keydown', e => {
-  if (e.key === 'Escape' && e.target.value) { e.target.value = ''; renderSide(); e.stopPropagation(); }
+  const t = e.target as HTMLInputElement;
+  if (e.key === 'Escape' && t.value) { t.value = ''; renderSide(); e.stopPropagation(); }
   if (e.key === 'ArrowDown') { e.preventDefault(); sideMoveTo(sideVisible()[0]); }
 });
 
 /* branch menu: right-click a branch, folder or remote in the panel, or a
    branch label in the graph. Hide follows the eye button's rules. */
 const ctxMenu = $('#ctxMenu');
-let ctxRun = [], ctxBack = null, ctxKeys = false;   // item actions; what gets focus back; keyboard in use
-function openCtx(e, entries, back){
+interface CtxEntry { label: string; off?: string; run: () => void }
+let ctxRun: (() => void)[] = [], ctxBack: HTMLElement | null = null, ctxKeys = false;   // item actions; what gets focus back; keyboard in use
+function openCtx(e: MouseEvent, entries: CtxEntry[], back: HTMLElement | null){
   e.preventDefault();
-  // From the Menu key / Shift+F10: pointerType '' (or no position at all).
-  ctxKeys = e.pointerType === '' || (!e.pointerType && !e.clientX && !e.clientY);
+  // From the Menu key / Shift+F10: pointerType '' (or no position at all). WebView2 sends a PointerEvent.
+  const pointerType = (e as PointerEvent).pointerType;
+  ctxKeys = pointerType === '' || (!pointerType && !e.clientX && !e.clientY);
   ctxRun = entries.map(x => x.run); ctxBack = back;
   ctxMenu.innerHTML = entries.map((x, k) => `<button class="menu-item" role="menuitem" data-k="${k}"${x.off ? ' disabled' : ''}>`
     + `<span class="n">${esc(x.label)}</span>${x.off ? `<span class="p">${esc(x.off)}</span>` : ''}</button>`).join('');
@@ -1928,33 +2011,33 @@ function openCtx(e, entries, back){
   ctxMenu.style.top = Math.max(4, Math.min(y, innerHeight - m.height - 4)) + 'px';
   // A mouse user gets no focus ring: the menu itself (no outline) holds focus
   // for the arrow keys, and items light up on hover.
-  ((ctxKeys && ctxMenu.querySelector('.menu-item:not(:disabled)')) || ctxMenu).focus();
+  ((ctxKeys && ctxMenu.querySelector<HTMLElement>('.menu-item:not(:disabled)')) || ctxMenu).focus();
 }
-function closeCtx(refocus){
+function closeCtx(refocus: boolean){
   if (ctxMenu.hidden) return;
   ctxMenu.hidden = true; ctxRun = [];
   if (refocus && ctxKeys && ctxBack && ctxBack.isConnected) ctxBack.focus();
-  else if (ctxMenu.contains(document.activeElement)) document.activeElement.blur();
+  else if (ctxMenu.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
   ctxBack = null;
 }
 const SOLO_OFF = 'Exit solo to hide branches', HEAD_OFF = 'The checked-out branch is always shown';
 
 sideList.addEventListener('contextmenu', e => {
-  const el = e.target.closest('[role="treeitem"]');
+  const el = (e.target as Element).closest<HTMLElement>('[role="treeitem"]');
   const leaf = el && el.dataset.kind === 'branch';
   if (!el || !el.dataset.ref || !(leaf || el.classList.contains('sb-node'))) return;
   sideMoveTo(el, false);
   const ref = el.dataset.ref, solo = soloList().length > 0;
   const show = !solo && el.classList.contains('is-hidden');
-  const entries = [{ label: show ? 'Show' : 'Hide', off: solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : '', run: () => toggleHidden(ref) }];
+  const entries: CtxEntry[] = [{ label: show ? 'Show' : 'Hide', off: solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : '', run: () => toggleHidden(ref) }];
   if (leaf) entries.push({ label: 'Copy branch name', run: () => copyText(refLabel(ref)) });
   openCtx(e, entries, el);
 });
 body.addEventListener('contextmenu', e => {
-  const pill = e.target.closest('.pill'), host = pill && pill.closest('.row, .ref-pop');
-  if (!host || host === wipRow) return;
+  const pill = (e.target as Element).closest<HTMLElement>('.pill'), host = pill && pill.closest<HTMLElement>('.row, .ref-pop');
+  if (!pill || !host || host === wipRow) return;
   // A label is one ref group of its commit (data-g): one name, local and/or on remotes.
-  const c = S.commits[+host.dataset.i], g = c && c.groups[+pill.dataset.g || 0];
+  const c = S.commits[+host.dataset.i!], g = c && c.groups[+pill.dataset.g! || 0];
   if (!g || g.kind !== 'branch' || g.name === 'HEAD (detached)') return;
   const refs = (g.local ? ['refs/heads/' + g.name] : []).concat(g.remotes.map(r => `refs/remotes/${r}/${g.name}`));
   const solo = soloList().length > 0;
@@ -1964,19 +2047,19 @@ body.addEventListener('contextmenu', e => {
   ], null);
 });
 ctxMenu.addEventListener('click', e => {
-  const b = e.target.closest('.menu-item'); if (!b || b.disabled) return;
-  const run = ctxRun[+b.dataset.k];
+  const b = (e.target as Element).closest<HTMLButtonElement>('.menu-item'); if (!b || b.disabled) return;
+  const run = ctxRun[+b.dataset.k!]!;   // data-k indexes the entries openCtx rendered
   closeCtx(true); run();
 });
 ctxMenu.addEventListener('keydown', e => {
   e.stopPropagation();   // the graph and panel keys stay off while the menu is open
   ctxKeys = true;        // from here on, focus rings and returning focus are wanted
-  const on = [...ctxMenu.querySelectorAll('.menu-item:not(:disabled)')], k = on.indexOf(document.activeElement);
-  const to = { ArrowDown: k + 1, ArrowUp: k < 0 ? -1 : k - 1, Home: 0, End: on.length - 1 }[e.key];
+  const on = [...ctxMenu.querySelectorAll<HTMLElement>('.menu-item:not(:disabled)')], k = on.indexOf(document.activeElement as HTMLElement);
+  const to = ({ ArrowDown: k + 1, ArrowUp: k < 0 ? -1 : k - 1, Home: 0, End: on.length - 1 } as Record<string, number>)[e.key];
   if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeCtx(true); }
-  else if (to !== undefined && on.length) { e.preventDefault(); on[(to + on.length) % on.length].focus(); }
+  else if (to !== undefined && on.length) { e.preventDefault(); on[(to + on.length) % on.length]!.focus(); }
 });
-document.addEventListener('pointerdown', e => { if (!ctxMenu.contains(e.target)) closeCtx(false); }, true);
+document.addEventListener('pointerdown', e => { if (!ctxMenu.contains(e.target as Node)) closeCtx(false); }, true);
 [wrap, sideList].forEach(el => el.addEventListener('scroll', () => closeCtx(false), { passive: true }));
 window.addEventListener('blur', () => closeCtx(false));
 window.addEventListener('resize', () => closeCtx(false));
@@ -1985,7 +2068,7 @@ window.addEventListener('resize', () => closeCtx(false));
 const SIDE = { min: 160, max: 520, def: 200 };
 const appEl = $('.app'), side = $('#side'), sideRz = $('.side-resizer');
 const narrowView = () => matchMedia('(max-width: 900px)').matches;
-let sideW = +lsGet('lanes.sidew');
+let sideW = Number(lsGet('lanes.sidew'));   // 0 when unset, NaN when not a number: both fail the range check below
 if (!(sideW >= SIDE.min && sideW <= SIDE.max)) sideW = SIDE.def;
 // On a small screen the panel floats over the graph, so it starts closed.
 let sideShown = !narrowView() && lsGet('lanes.side') !== '0';
@@ -2005,12 +2088,12 @@ sideRz.setAttribute('aria-valuemax', String(SIDE.max));
 applySide();
 $('#sideBtn').addEventListener('click', () => showSide());
 {
-  const set = w => { sideW = Math.round(Math.max(SIDE.min, Math.min(SIDE.max, w))); applySide(); };
+  const set = (w: number) => { sideW = Math.round(Math.max(SIDE.min, Math.min(SIDE.max, w))); applySide(); };
   const save = () => lsSet('lanes.sidew', String(sideW));
   sideRz.addEventListener('pointerdown', e => {
     e.preventDefault(); sideRz.setPointerCapture(e.pointerId); sideRz.classList.add('drag');
     const startX = e.clientX, startW = sideW;
-    const move = ev => set(startW + ev.clientX - startX);
+    const move = (ev: PointerEvent) => set(startW + ev.clientX - startX);
     const up = () => { sideRz.classList.remove('drag'); sideRz.removeEventListener('pointermove', move); sideRz.removeEventListener('pointerup', up); save(); };
     sideRz.addEventListener('pointermove', move); sideRz.addEventListener('pointerup', up);
   });
@@ -2022,27 +2105,27 @@ $('#sideBtn').addEventListener('click', () => showSide());
 }
 
 /* ---------- banner ---------- */
-function showError(msg){ $('#bannerMsg').textContent = msg; $('#banner').hidden = false; }
+function showError(msg: string){ $('#bannerMsg').textContent = msg; $('#banner').hidden = false; }
 function hideError(){ $('#banner').hidden = true; }
 $('#bannerClose').addEventListener('click', hideError);
 
 /* ---------- desktop: real repositories ---------- */
-let current = null;          // { path, name }
-let fingerprintSeen = null;
+let current: RepoInfo | null = null;
+let fingerprintSeen: string | null = null;
 let busy = false, moreBusy = false;
 let streamGen = 0;           // backend history stream the loaded rows came from
 let streamPos = 0;           // records consumed from that stream (rows can also come from syncs)
 const SYNC_CAP = 5000;       // more new commits than this: reload instead of merging
 
-function recentList(){ return lsJSON('lanes.recent', []).filter(r => r && r.path); }
-function addRecent(info){
+function recentList(){ return lsJSON<RepoInfo[]>('lanes.recent', []).filter(r => r && r.path); }
+function addRecent(info: RepoInfo){
   const list = recentList().filter(r => r.path !== info.path);
   list.unshift({ path: info.path, name: info.name });
   lsSet('lanes.recent', JSON.stringify(list.slice(0, 8)));
 }
-function forgetRecent(path){ lsSet('lanes.recent', JSON.stringify(recentList().filter(r => r.path !== path))); }
+function forgetRecent(path: string){ lsSet('lanes.recent', JSON.stringify(recentList().filter(r => r.path !== path))); }
 
-function recentButtons(cls){
+function recentButtons(cls: string){
   return recentList().map(r => `<button class="${cls}" data-path="${esc(r.path)}" title="${esc(r.path)}"><span class="n">${esc(r.name)}</span><span class="p">${esc(r.path)}</span></button>`).join('');
 }
 function showEmpty(){
@@ -2051,7 +2134,7 @@ function showEmpty(){
   $('#emptyRecent').innerHTML = items ? `<div class="t">Recent</div>${items}` : '';
 }
 
-async function loadRepo(info, { keep = false, manual = false } = {}){
+async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep?: boolean; manual?: boolean } = {}){
   if (busy) return;
   busy = true; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
@@ -2059,15 +2142,15 @@ async function loadRepo(info, { keep = false, manual = false } = {}){
   try {
     // A refresh reloads as deep as the user had scrolled, so the view stays put.
     const want = keep ? Math.max(PAGE, S.commits.length) : PAGE;
-    const st = await core.invoke('start_history', { path: info.path, hidden, solo });
+    const st = await invoke('start_history', { path: info.path, hidden, solo });
     // Every soloed branch is gone (deleted, renamed): leave solo; the
     // finally block below reloads with the full graph.
     if (solo.length && !st.refs.refs.some(([, n]) => coveredBy(n, solo))) { saveSolo([], info.path); hiddenGen++; }
-    const page = await core.invoke('history_page', { gen: st.gen, start: 0, count: want });
+    const page = await invoke('history_page', { gen: st.gen, start: 0, count: want });
     const { commits, bad } = parseLog(page.log);
     // The ref listing ran alongside the log; if anything moved meanwhile the
     // refs may be newer than the rows, so the next poll reloads in full.
-    const settled = await core.invoke('repo_fingerprint', { path: info.path });
+    const settled = await invoke('repo_fingerprint', { path: info.path });
     current = info; fingerprintSeen = st.fingerprint; streamGen = st.gen; streamPos = commits.length + bad.length;
     $('#emptyState').hidden = true;
     setData(commits, info.name, false, { remotes: st.remotes, refs: st.refs, hidden, solo, keep, ordered: true, more: page.more, capped: page.capped });
@@ -2082,13 +2165,13 @@ async function loadRepo(info, { keep = false, manual = false } = {}){
   } finally {
     busy = false; document.body.classList.remove('loading');
     // Branches were hidden or shown while this ran with the old list.
-    if (hg !== hiddenGen && current) setTimeout(() => loadRepo(current, { keep: true }), 0);
+    if (hg !== hiddenGen && current) setTimeout(() => loadRepo(current!, { keep: true }), 0);   // read when it runs, as before
   }
 }
 
-async function openPath(path, { quiet = false } = {}){
+async function openPath(path: string, { quiet = false }: { quiet?: boolean } = {}){
   try {
-    const info = await core.invoke('open_repo', { path });
+    const info = await invoke('open_repo', { path });
     closeMenu();
     await loadRepo(info);
   } catch (e) {
@@ -2101,7 +2184,7 @@ async function openPath(path, { quiet = false } = {}){
 async function pickRepo(){
   closeMenu();
   try {
-    const info = await core.invoke('pick_repo');
+    const info = await invoke('pick_repo', {});
     if (!info) return;
     await loadRepo(info);
   } catch (e) { showError(String(e)); }
@@ -2110,20 +2193,21 @@ async function pickRepo(){
 /* Infinite scroll: append the next page of the current stream. A reload
    that starts a new stream meanwhile makes this result stale.
    Returns true when a page was added, 'skip' when nothing ran, false on error. */
-async function loadMore(){
+async function loadMore(): Promise<boolean | 'skip'>{
   if (!NATIVE || !current || busy || moreBusy || !S.more) return 'skip';
   moreBusy = true;
   const gen = streamGen, start = streamPos;
   try {
-    const page = await core.invoke('history_page', { gen, start, count: PAGE });
+    const page = await invoke('history_page', { gen, start, count: PAGE });
     if (gen !== streamGen || start !== streamPos) return 'skip';
     const { commits, bad } = parseLog(page.log);
     streamPos += commits.length + bad.length;
     appendCommits(commits);
-    S.more = page.more && commits.length > 0; S.capped = page.capped; S.bad += bad.length;
+    S.more = page.more && commits.length > 0; S.capped = page.capped; S.bad! += bad.length;   // set by loadRepo
     updateView();
-    if ($('#q').value.trim()) runSearch();
-    if (S.commits[sel] && detailFor === S.commits[sel]) renderDetail(S.commits[sel]);   // parents may now be loaded
+    if ($<HTMLInputElement>('#q').value.trim()) runSearch();
+    const cur = S.commits[sel];
+    if (cur && detailFor === cur) renderDetail(cur);   // parents may now be loaded
     if (sideWaiting.some(h => S.idx.has(h))) renderSide();   // branch tips now in view
     placeStashes();   // this page may hold a stash's base
   } catch (e) {
@@ -2145,12 +2229,13 @@ async function refresh(){ if (current) await loadRepo(current, { keep: true, man
    reload at the same depth. */
 async function syncRepo(){
   if (!current || busy || moreBusy) return;
-  let full = S.forceFull ? 'refs may be newer than the loaded rows' : null;
+  let full: string | null = S.forceFull ? 'refs may be newer than the loaded rows' : null;
   if (!full) {
     busy = true;
     const hg = hiddenGen, hidden = hiddenList(), solo = soloList();
     try {
-      const r = await core.invoke('sync_history', { path: current.path, exclude: [...S.tips], hidden, solo, limit: SYNC_CAP });
+      // A loaded desktop repo always has tips (setData).
+      const r = await invoke('sync_history', { path: current.path, exclude: [...S.tips!], hidden, solo, limit: SYNC_CAP });
       if (hg !== hiddenGen) full = 'hidden branches changed';
       else if (r.fingerprintBefore !== r.fingerprintAfter) full = 'repo changed while reading';
       else if (r.over) full = 'too many new commits';
@@ -2158,9 +2243,10 @@ async function syncRepo(){
         const { commits, bad } = parseLog(r.log);
         // Tips and labels from visible refs only, as in a full load; the
         // panel keeps the whole listing.
-        const plan = bad.length ? { full: 'unreadable entries' } : planSync(S, walkRefs(r.refs, hidden, solo), commits, labelRefs(r.refs, hidden, solo));
-        if (!plan.full) plan.allRefs = r.refs;
-        if (plan.full) full = plan.full;
+        // The reasons in { full } are never empty, so a string full is the same test as a truthy one.
+        const plan: { full: string } | SyncPlan = bad.length ? { full: 'unreadable entries' } : planSync(S as SyncFrom, walkRefs(r.refs, hidden, solo), commits, labelRefs(r.refs, hidden, solo));
+        if (typeof plan.full !== 'string') plan.allRefs = r.refs;
+        if (typeof plan.full === 'string') full = plan.full;
         else { applySync(plan); fingerprintSeen = r.fingerprintBefore; loadTracking(); loadStashes(); loadPrs({ minAge: 30e3 }); loadWip({ force: true }); }
       }
     } catch (e) {
@@ -2175,7 +2261,7 @@ async function syncRepo(){
 async function poll(){
   if (!current || busy || moreBusy || document.hidden) return;
   try {
-    const fp = await core.invoke('repo_fingerprint', { path: current.path });
+    const fp = await invoke('repo_fingerprint', { path: current.path });
     if (fp !== fingerprintSeen) await syncRepo();
     loadPrs();   // returns at once unless PR_EVERY has passed
     loadWip();   // likewise, unless its interval has passed
@@ -2191,32 +2277,36 @@ function toggleMenu(){
   menu.innerHTML = (items || '<div class="hint">No recent repositories</div>') + '<hr><button class="menu-item" data-action="open"><span class="n">Open another repository…</span></button>';
   menu.hidden = false; $('#repoBtn').setAttribute('aria-expanded', 'true');
 }
-function onRecentClick(e){
-  const b = e.target.closest('[data-path],[data-action]'); if (!b) return;
-  if (b.dataset.action === 'open') pickRepo(); else openPath(b.dataset.path);
+function onRecentClick(e: MouseEvent){
+  const b = (e.target as Element).closest<HTMLElement>('[data-path],[data-action]'); if (!b) return;
+  if (b.dataset.action === 'open') pickRepo(); else openPath(b.dataset.path!);
 }
 
 /* ---------- browser mode: manual import ---------- */
-function openModal(){ $('#modal').hidden = false; $('#err').textContent = ''; $('#repoIn').value = S.sample ? '' : S.repo; $('#logIn').focus(); }
+function openModal(){ $('#modal').hidden = false; $('#err').textContent = ''; $<HTMLInputElement>('#repoIn').value = S.sample ? '' : S.repo; $('#logIn').focus(); }
 function closeModal(){ $('#modal').hidden = true; }
 
 /* ---------- events ---------- */
+// Clicks and keys below come from elements of the page; data-* attributes are the ones this file renders.
 body.addEventListener('click', e => {
-  const pop = e.target.closest('.ref-pop'); if (pop) { select(+pop.dataset.i, { open: true }); return; }
-  const r = e.target.closest('.row'); if (!r) return;
-  if (r === wipRow) selectWip({ open: true }); else select(+r.dataset.i, { open: true });
+  const t = e.target as Element;
+  const pop = t.closest<HTMLElement>('.ref-pop'); if (pop) { select(+pop.dataset.i!, { open: true }); return; }
+  const r = t.closest<HTMLElement>('.row'); if (!r) return;
+  if (r === wipRow) selectWip({ open: true }); else select(+r.dataset.i!, { open: true });
 });
 detail.addEventListener('click', e => {
-  const df = e.target.closest('[data-df]'); if (df) { openDiff(+df.dataset.df); return; }
-  const j = e.target.closest('[data-jump]'); if (j) { closeDiff(); select(S.idx.get(j.dataset.jump), { scroll: true, open: detail.classList.contains('open') }); return; }
-  const cp = e.target.closest('[data-copy]'); if (cp) { copyText(cp.dataset.copy, cp); return; }
-  const ou = e.target.closest('[data-open-url]'); if (ou) { core.invoke('open_url', { url: ou.dataset.openUrl }).catch(err => showError(String(err))); return; }
-  if (e.target.closest('.d-close')) detail.classList.remove('open');
+  const t = e.target as Element;
+  const df = t.closest<HTMLElement>('[data-df]'); if (df) { openDiff(+df.dataset.df!); return; }
+  // data-jump is only rendered for loaded commits (hashLink).
+  const j = t.closest<HTMLElement>('[data-jump]'); if (j) { closeDiff(); select(S.idx.get(j.dataset.jump!)!, { scroll: true, open: detail.classList.contains('open') }); return; }
+  const cp = t.closest<HTMLElement>('[data-copy]'); if (cp) { copyText(cp.dataset.copy!, cp); return; }
+  const ou = t.closest<HTMLElement>('[data-open-url]'); if (ou) { invoke('open_url', { url: ou.dataset.openUrl! }).catch(err => showError(String(err))); return; }
+  if (t.closest('.d-close')) detail.classList.remove('open');
 });
 $('#q').addEventListener('input', runSearch);
 $('#q').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && matches.length) { matchPtr = (matchPtr + 1) % matches.length; select(matches[matchPtr], { scroll: true }); $('#qCount').textContent = `${matchPtr + 1} of ${matches.length}`; }
-  if (e.key === 'Escape') { e.target.value = ''; runSearch(); e.target.blur(); }
+  if (e.key === 'Enter' && matches.length) { matchPtr = (matchPtr + 1) % matches.length; select(matches[matchPtr]!, { scroll: true }); $('#qCount').textContent = `${matchPtr + 1} of ${matches.length}`; }
+  if (e.key === 'Escape') { const q = e.target as HTMLInputElement; q.value = ''; runSearch(); q.blur(); }
 });
 document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
@@ -2235,13 +2325,13 @@ document.addEventListener('keydown', e => {
   }
   if (diffOpen()) {
     // The graph is covered: keys move between files instead of commits.
-    if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement.tagName) || side.contains(document.activeElement)) return;
+    if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement!.tagName) || side.contains(document.activeElement)) return;
     if (e.key === 'j' || e.key === ']') { e.preventDefault(); stepDiff(1); }
     else if (e.key === 'k' || e.key === '[') { e.preventDefault(); stepDiff(-1); }
     return;
   }
   const n = S.commits.length;
-  if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement.tagName) || side.contains(document.activeElement) || !n) return;
+  if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement!.tagName) || side.contains(document.activeElement) || !n) return;
   const open = detail.classList.contains('open');
   if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); select(Math.min(sel + 1, n - 1), { scroll: true, open }); }
   else if (e.key === 'ArrowUp' || e.key === 'k') {
@@ -2252,12 +2342,12 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'End') { e.preventDefault(); select(n - 1, { scroll: true, open }); }
   else if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
 });
-document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.repo-wrap')) closeMenu(); });
+document.addEventListener('click', e => { if (!menu.hidden && !(e.target as Element).closest('.repo-wrap')) closeMenu(); });
 if (NATIVE) {
   // The webview's own menu (Back, Refresh, Print…) does nothing useful here. Keep it only
   // in text boxes (paste) and while text is selected (copy).
   document.addEventListener('contextmenu', e => {
-    const box = e.target.closest('input, textarea');
+    const box = (e.target as Element).closest<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
     if (box && !/^(checkbox|radio|button|submit|reset|range|color|file)$/.test(box.type)) return;
     if (String(getSelection()).trim()) return;
     e.preventDefault();
@@ -2266,22 +2356,23 @@ if (NATIVE) {
 
 /* column resize: drag a header's right edge, double-click it to reset,
    or focus it and use the arrow keys. */
-document.querySelectorAll('.head .resizer').forEach(rz => {
-  const key = rz.dataset.col;
-  const current = () => {
+document.querySelectorAll<HTMLElement>('.head .resizer').forEach(rz => {
+  const key = rz.dataset.col as ColKey;   // data-col in index.html is one of the column keys
+  const all = cols as Record<ColKey, number | null>;
+  const current = (): number => {
     if (key === 'graph') return graphColW();
-    if (key === 'msg') return cols.msg || rz.parentElement.getBoundingClientRect().width;
-    return cols[key];
+    if (key === 'msg') return cols.msg || rz.parentElement!.getBoundingClientRect().width;
+    return all[key]!;   // ref and date always have a width
   };
-  const set = w => { cols[key] = Math.round(Math.max(COLS[key].min, Math.min(COLS[key].max, w))); applyCols(); };
+  const set = (w: number) => { all[key] = Math.round(Math.max(COLS[key].min, Math.min(COLS[key].max, w))); applyCols(); };
   rz.addEventListener('pointerdown', e => {
     e.preventDefault(); rz.setPointerCapture(e.pointerId); rz.classList.add('drag');
     const startX = e.clientX, startW = current();
-    const move = ev => set(startW + ev.clientX - startX);
+    const move = (ev: PointerEvent) => set(startW + ev.clientX - startX);
     const up = () => { rz.classList.remove('drag'); rz.removeEventListener('pointermove', move); rz.removeEventListener('pointerup', up); saveCols(); };
     rz.addEventListener('pointermove', move); rz.addEventListener('pointerup', up);
   });
-  rz.addEventListener('dblclick', () => { cols[key] = COLS[key].reset(); applyCols(); saveCols(); });
+  rz.addEventListener('dblclick', () => { all[key] = COLS[key].reset(); applyCols(); saveCols(); });
   rz.addEventListener('keydown', e => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault(); set(current() + (e.key === 'ArrowRight' ? 10 : -10)); saveCols();
@@ -2303,6 +2394,8 @@ wrap.addEventListener('scroll', () => { closeRefPop(); scheduleDraw(); }, { pass
 new ResizeObserver(scheduleDraw).observe(wrap);
 
 /* ---------- boot ---------- */
+// tests/ui reads state through this; real builds have __TEST__ = false and drop it.
+if (__TEST__) window.__lanes = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn };
 if (NATIVE) {
   $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;
@@ -2317,7 +2410,7 @@ if (NATIVE) {
   window.addEventListener('focus', () => loadWip({ force: true }));   // back from the editor
   document.addEventListener('visibilitychange', poll);
 
-  const last = lsJSON('lanes.last', null);
+  const last = lsJSON<RepoInfo | null>('lanes.last', null);
   if (last && last.path) openPath(last.path, { quiet: true });
   else showEmpty();
 } else {
@@ -2326,22 +2419,23 @@ if (NATIVE) {
   $('#importBtn').hidden = false;
   $('#importBtn').addEventListener('click', openModal);
   $('#cancelBtn').addEventListener('click', closeModal);
-  $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
-  $('#copyCmd').addEventListener('click', e => copyText($('#cmd').textContent, e.currentTarget));
+  $('#modal').addEventListener('click', e => { if ((e.target as Element).id === 'modal') closeModal(); });
+  $('#copyCmd').addEventListener('click', e => copyText($('#cmd').textContent!, e.currentTarget as HTMLElement));
   $('#fileIn').addEventListener('change', async e => {
-    const f = e.target.files[0]; if (!f) return;
+    const input = e.target as HTMLInputElement;
+    const f = input.files![0]; if (!f) return;
     const buf = await f.arrayBuffer(); const b = new Uint8Array(buf);
     const enc = (b[0] === 0xFF && b[1] === 0xFE) ? 'utf-16le' : (b[0] === 0xFE && b[1] === 0xFF) ? 'utf-16be' : 'utf-8';
-    $('#logIn').value = new TextDecoder(enc).decode(buf).replace(/^\uFEFF/, '');
+    $<HTMLTextAreaElement>('#logIn').value = new TextDecoder(enc).decode(buf).replace(/^\uFEFF/, '');
     const base = f.name.replace(/\.(txt|log)$/i, '');
-    if (!$('#repoIn').value && base !== 'lanes') $('#repoIn').value = base;
-    e.target.value = '';
+    if (!$<HTMLInputElement>('#repoIn').value && base !== 'lanes') $<HTMLInputElement>('#repoIn').value = base;
+    input.value = '';
   });
   $('#loadBtn').addEventListener('click', () => {
-    const text = $('#logIn').value;
+    const text = $<HTMLTextAreaElement>('#logIn').value;
     const { commits, bad } = parseLog(text);
     if (!commits.length) { $('#err').textContent = 'No commits found. Use the exact command above, without --graph or --oneline.'; return; }
-    const repo = $('#repoIn').value.trim() || 'my-repo';
+    const repo = $<HTMLInputElement>('#repoIn').value.trim() || 'my-repo';
     if (!lsSet('lanes.log', text.length < 4e6 ? text : '')) lsDel('lanes.log');
     lsSet('lanes.repo', repo);
     closeModal();

@@ -1,0 +1,158 @@
+24a48ded788f7bf05559a8b38a741b8df0db8709|~|680a520b6bbb7b35b81790cf65a9965519759990|~|กมล ใจดี|~|kamol@example.com|~|1775075700|~|HEAD -> develop|~|แก้ไขข้อความแจ้งเตือนให้ชัดเจนขึ้น
+680a520b6bbb7b35b81790cf65a9965519759990|~|2db8511584be666a79306acc19afb6b332b8fc3d|~|Nattaya Kongsri|~|nattaya@example.com|~|1775056140|~||~|WIP: unread badge in nav bar
+165fc28575483d261f153dfd808b6cb950fc0160|~|f6703612d0f9fc31005e2d3a50d2263b02e979ac|~|Pim Suwan|~|pim@example.com|~|1775040960|~|feature/mobile-nav|~|ปรับปรุง mobile-nav ให้โหลดเร็วขึ้น
+f6703612d0f9fc31005e2d3a50d2263b02e979ac|~|0f47d6fcef34af9a16fc910950f32bf331d4712b|~|Alex Rivera|~|alex@example.com|~|1775025120|~|origin/feature/mobile-nav|~|Wire up mobile-nav API
+0f47d6fcef34af9a16fc910950f32bf331d4712b|~|2db8511584be666a79306acc19afb6b332b8fc3d|~|Alex Rivera|~|alex@example.com|~|1775019420|~||~|แก้ไขบั๊ก mobile-nav ตอนไม่มีข้อมูล
+f55278db54605ff79a98486a79381ca530494af9|~|21257315b1c21ee9389db7ba6fc57cbf5c2c0534|~|Alex Rivera|~|alex@example.com|~|1774991520|~|feature/reports|~|ปรับปรุง reports ให้โหลดเร็วขึ้น
+21257315b1c21ee9389db7ba6fc57cbf5c2c0534|~|f5d2cf62e292810daaebd061f95ce4917ee3672c|~|Somchai Prasert|~|somchai@example.com|~|1774959480|~|origin/feature/reports|~|แก้ไขบั๊ก reports ตอนไม่มีข้อมูล
+f5d2cf62e292810daaebd061f95ce4917ee3672c|~|2db8511584be666a79306acc19afb6b332b8fc3d|~|Jordan Lee|~|jordan@example.com|~|1774954080|~||~|Polish reports styles
+2db8511584be666a79306acc19afb6b332b8fc3d|~|ca043e7a802c770e4c0772aad7f33d953e728132 6f4eb631098036c399fb0424d38391acec5c7bb9|~|Somchai Prasert|~|somchai@example.com|~|1774926240|~|origin/develop|~|Merge branch 'release/0.8' into develop
+6b4c3b31fb7fa6a01af15312f4bc1d64dfb7bcb8|~|735f833158038671046195b14795c973c82c559e 6f4eb631098036c399fb0424d38391acec5c7bb9|~|Somchai Prasert|~|somchai@example.com|~|1774902960|~|tag: v0.8.0, origin/main, origin/HEAD, main|~|Merge branch 'release/0.8'
+6f4eb631098036c399fb0424d38391acec5c7bb9|~|1eb8b17fa2f8fa4c291d9752932825a1b304c1d9|~|Somchai Prasert|~|somchai@example.com|~|1774899720|~||~|Update CHANGELOG for 0.8.0
+1eb8b17fa2f8fa4c291d9752932825a1b304c1d9|~|ca043e7a802c770e4c0772aad7f33d953e728132|~|Somchai Prasert|~|somchai@example.com|~|1774897440|~||~|Bump version to 0.8.0
+ca043e7a802c770e4c0772aad7f33d953e728132|~|e328a5e0e4182c092bbd915d25fb26943a80d2e6 e866fd60920ccc7c1fe9d1ab5d890eb58fc12a2b|~|Somchai Prasert|~|somchai@example.com|~|1774867620|~||~|Merge pull request #27 from acme/feature/auth-v2
+e866fd60920ccc7c1fe9d1ab5d890eb58fc12a2b|~|aa2c710ee87ee69d38ac5542b66837fee9bc6ab3|~|Alex Rivera|~|alex@example.com|~|1774865940|~|feature/auth-v2|~|Fix auth-v2 edge case when the list is empty
+aa2c710ee87ee69d38ac5542b66837fee9bc6ab3|~|f749bbcca845bbf53a81fc1786ad61805f3f058c e328a5e0e4182c092bbd915d25fb26943a80d2e6|~|Pim Suwan|~|pim@example.com|~|1774851600|~||~|Merge branch 'develop' into feature/auth-v2
+f749bbcca845bbf53a81fc1786ad61805f3f058c|~|a7324af623fffd65fd7b513a1a55a4c6884ad8f1|~|Pim Suwan|~|pim@example.com|~|1774837800|~||~|เพิ่มข้อความภาษาไทยใน auth-v2
+a7324af623fffd65fd7b513a1a55a4c6884ad8f1|~|41c06b01c30ab0074533a5efcced9358f914d9df|~|Somchai Prasert|~|somchai@example.com|~|1774822380|~||~|Wire up auth-v2 API
+e328a5e0e4182c092bbd915d25fb26943a80d2e6|~|4ee8e1a8ff798553cf8d67e4ef1c86e04e7966c6 436d4ee68c67dfa38791763d8ee6e7fb46444720|~|Somchai Prasert|~|somchai@example.com|~|1774794240|~||~|Merge pull request #26 from acme/feature/onboarding
+436d4ee68c67dfa38791763d8ee6e7fb46444720|~|7c1aa26083d7f72e5285ddce02dd4697315f87a4|~|Somchai Prasert|~|somchai@example.com|~|1774782720|~|feature/onboarding|~|Add tests for onboarding
+7c1aa26083d7f72e5285ddce02dd4697315f87a4|~|56e82d48fc9da66e1caa1240423a68c688be0794|~|Somchai Prasert|~|somchai@example.com|~|1774752000|~||~|Add onboarding component
+56e82d48fc9da66e1caa1240423a68c688be0794|~|d53d393cd537718c7729c0eaa80e6892798d62ae|~|Alex Rivera|~|alex@example.com|~|1774724220|~||~|Fix onboarding edge case when the list is empty
+41c06b01c30ab0074533a5efcced9358f914d9df|~|2afa59dc7c3862380103904c36d61b496fb26b08|~|กมล ใจดี|~|kamol@example.com|~|1774708080|~||~|แก้ไขบั๊ก auth-v2 ตอนไม่มีข้อมูล
+2afa59dc7c3862380103904c36d61b496fb26b08|~|d53d393cd537718c7729c0eaa80e6892798d62ae|~|Alex Rivera|~|alex@example.com|~|1774697400|~||~|Refactor auth-v2 into hooks
+4ee8e1a8ff798553cf8d67e4ef1c86e04e7966c6|~|d53d393cd537718c7729c0eaa80e6892798d62ae ed9d279be5518247a1fba81b5c8b2ce4c1e59769|~|Somchai Prasert|~|somchai@example.com|~|1774669860|~||~|Merge pull request #25 from acme/feature/settings
+ed9d279be5518247a1fba81b5c8b2ce4c1e59769|~|15ef723475b33d0d1b3bc15764b8508a7ad4eaa7|~|Somchai Prasert|~|somchai@example.com|~|1774667940|~|feature/settings|~|Refactor settings into hooks
+15ef723475b33d0d1b3bc15764b8508a7ad4eaa7|~|4cb7d2e1c1f97b7aaab3a7bd21fc558df1d337b2 d53d393cd537718c7729c0eaa80e6892798d62ae|~|Nattaya Kongsri|~|nattaya@example.com|~|1774656960|~||~|Merge branch 'develop' into feature/settings
+4cb7d2e1c1f97b7aaab3a7bd21fc558df1d337b2|~|d53d393cd537718c7729c0eaa80e6892798d62ae|~|Jordan Lee|~|jordan@example.com|~|1774646580|~||~|Wire up settings API
+d53d393cd537718c7729c0eaa80e6892798d62ae|~|474ca73ca48b25ba803a11c36a78ace2a26ae225 859da33dc2e7c573f603f492404257e7da9d6c5f|~|Somchai Prasert|~|somchai@example.com|~|1774624140|~||~|Merge branch 'hotfix/login-crash-5' into develop
+735f833158038671046195b14795c973c82c559e|~|7ed4f01f991a7516c1244590b3a3b4eeb4b01b15 859da33dc2e7c573f603f492404257e7da9d6c5f|~|Somchai Prasert|~|somchai@example.com|~|1774610460|~|tag: v0.7.1|~|Merge branch 'hotfix/login-crash-5'
+859da33dc2e7c573f603f492404257e7da9d6c5f|~|7ed4f01f991a7516c1244590b3a3b4eeb4b01b15|~|Alex Rivera|~|alex@example.com|~|1774598040|~||~|Fix crash when session cookie is missing
+474ca73ca48b25ba803a11c36a78ace2a26ae225|~|d5c0f10fb7385bf42b70bd734f90233b26df4fad b64e8816723997816d95583e463aeb89f907b6b7|~|Somchai Prasert|~|somchai@example.com|~|1774593120|~||~|Merge branch 'release/0.7' into develop
+7ed4f01f991a7516c1244590b3a3b4eeb4b01b15|~|4b5d66561af4956d0a61b9c28801dd84cd3f236a b64e8816723997816d95583e463aeb89f907b6b7|~|Somchai Prasert|~|somchai@example.com|~|1774573860|~|tag: v0.7.0|~|Merge branch 'release/0.7'
+b64e8816723997816d95583e463aeb89f907b6b7|~|5eef324eaafa370de014158e368fb055e0963fcf|~|Somchai Prasert|~|somchai@example.com|~|1774555740|~||~|Update CHANGELOG for 0.7.0
+5eef324eaafa370de014158e368fb055e0963fcf|~|d5c0f10fb7385bf42b70bd734f90233b26df4fad|~|Somchai Prasert|~|somchai@example.com|~|1774529820|~||~|Bump version to 0.7.0
+d5c0f10fb7385bf42b70bd734f90233b26df4fad|~|1729918027bd6f690ec63c7f39a4635687053bcd a2406cba48031161280679ce4e5607e0d7076527|~|Somchai Prasert|~|somchai@example.com|~|1774501260|~||~|Merge pull request #24 from acme/feature/charts
+a2406cba48031161280679ce4e5607e0d7076527|~|9f995b3b060ddc585e0c50649148a3f8bb347b64|~|Nattaya Kongsri|~|nattaya@example.com|~|1774495920|~||~|Wire up charts API
+9f995b3b060ddc585e0c50649148a3f8bb347b64|~|4d5a6db22f287c3b756bb874c3cc6a0b074b27b6 1729918027bd6f690ec63c7f39a4635687053bcd|~|Somchai Prasert|~|somchai@example.com|~|1774489500|~||~|Merge branch 'develop' into feature/charts
+4d5a6db22f287c3b756bb874c3cc6a0b074b27b6|~|e6d19674d8da8fb7a58bf478e949b18d94f23e32|~|Pim Suwan|~|pim@example.com|~|1774487160|~||~|Refactor charts into hooks
+1729918027bd6f690ec63c7f39a4635687053bcd|~|b38e50b7019a7eb9b2854af0d9dfeb3c706bb7e0 c8949104b16c579d4b8c9a3f01ed6c6666db44d2|~|Somchai Prasert|~|somchai@example.com|~|1774455840|~||~|Merge pull request #23 from acme/feature/onboarding
+c8949104b16c579d4b8c9a3f01ed6c6666db44d2|~|084cc0ba89c1f3adce580f37690485485b5f4289|~|Jordan Lee|~|jordan@example.com|~|1774425480|~||~|Add onboarding component
+084cc0ba89c1f3adce580f37690485485b5f4289|~|55a0445550d7d17b758cad21d114725fe33e4c91|~|Nattaya Kongsri|~|nattaya@example.com|~|1774414980|~||~|Wire up onboarding API
+55a0445550d7d17b758cad21d114725fe33e4c91|~|fe8319147fb1fc8314c24a4c9cc1deab06e9637d|~|Pim Suwan|~|pim@example.com|~|1774394580|~||~|Fix onboarding edge case when the list is empty
+e6d19674d8da8fb7a58bf478e949b18d94f23e32|~|22078ce911eb0c1f3787f775a8b3522aaab21234|~|Somchai Prasert|~|somchai@example.com|~|1774392840|~||~|เพิ่มข้อความภาษาไทยใน charts
+22078ce911eb0c1f3787f775a8b3522aaab21234|~|1ea25ce6d553977aeed523762290772bf449bd96|~|Pim Suwan|~|pim@example.com|~|1774367040|~||~|Wire up charts API
+b38e50b7019a7eb9b2854af0d9dfeb3c706bb7e0|~|9ca2af4b926b80c96475840e93dd4affa051d9be 1d3f5ae0f4e90314a38a9795c1418199434cb785|~|Somchai Prasert|~|somchai@example.com|~|1774349760|~||~|Merge pull request #22 from acme/feature/offline-mode
+1d3f5ae0f4e90314a38a9795c1418199434cb785|~|66001f68d1193a125eed8f21871646754b882e3c|~|Somchai Prasert|~|somchai@example.com|~|1774340640|~||~|ปรับปรุง offline-mode ให้โหลดเร็วขึ้น
+9ca2af4b926b80c96475840e93dd4affa051d9be|~|35a15d0cc95bf8a6ec9e00e026d1a2e3ee48ddb3|~|Jordan Lee|~|jordan@example.com|~|1774325880|~||~|Update dependencies
+66001f68d1193a125eed8f21871646754b882e3c|~|12c72c93503acfb24d8602434a89be1c425d6ccf 35a15d0cc95bf8a6ec9e00e026d1a2e3ee48ddb3|~|Jordan Lee|~|jordan@example.com|~|1774323900|~||~|Merge branch 'develop' into feature/offline-mode
+12c72c93503acfb24d8602434a89be1c425d6ccf|~|67f953bc34ae6e3cac293547d1987efd559bcf89|~|Jordan Lee|~|jordan@example.com|~|1774309260|~||~|Wire up offline-mode API
+67f953bc34ae6e3cac293547d1987efd559bcf89|~|b76fb9fc9118aa2a74f93fc1be62b4fbc66c92ad|~|กมล ใจดี|~|kamol@example.com|~|1774287420|~||~|Polish offline-mode styles
+fe8319147fb1fc8314c24a4c9cc1deab06e9637d|~|f89dbc86488f3c6dd76878f295390f4aa7b14407|~|Somchai Prasert|~|somchai@example.com|~|1774263180|~||~|ปรับปรุง onboarding ให้โหลดเร็วขึ้น
+b76fb9fc9118aa2a74f93fc1be62b4fbc66c92ad|~|8e38d211a0821731a9ae8c8cb8b716723ae9fe39|~|กมล ใจดี|~|kamol@example.com|~|1774243140|~||~|แก้ไขบั๊ก offline-mode ตอนไม่มีข้อมูล
+1ea25ce6d553977aeed523762290772bf449bd96|~|54fe5e2ce6a2f02a8182b12cb28ef6e503a0df25|~|Nattaya Kongsri|~|nattaya@example.com|~|1774226700|~||~|แก้ไขบั๊ก charts ตอนไม่มีข้อมูล
+f89dbc86488f3c6dd76878f295390f4aa7b14407|~|fdc652372f1d760c67849fd47ba884cd79cd5fba|~|Nattaya Kongsri|~|nattaya@example.com|~|1774202100|~||~|แก้ไขบั๊ก onboarding ตอนไม่มีข้อมูล
+8e38d211a0821731a9ae8c8cb8b716723ae9fe39|~|54fe5e2ce6a2f02a8182b12cb28ef6e503a0df25|~|Alex Rivera|~|alex@example.com|~|1774196220|~||~|Wire up offline-mode API
+fdc652372f1d760c67849fd47ba884cd79cd5fba|~|54fe5e2ce6a2f02a8182b12cb28ef6e503a0df25|~|Pim Suwan|~|pim@example.com|~|1774177020|~||~|แก้ไขบั๊ก onboarding ตอนไม่มีข้อมูล
+35a15d0cc95bf8a6ec9e00e026d1a2e3ee48ddb3|~|54fe5e2ce6a2f02a8182b12cb28ef6e503a0df25|~|Jordan Lee|~|jordan@example.com|~|1774147800|~||~|Fix flaky date formatting test
+54fe5e2ce6a2f02a8182b12cb28ef6e503a0df25|~|4e682448b1c33286039285efadd98e0ff130c403|~|Pim Suwan|~|pim@example.com|~|1774142280|~||~|อัปเดตโลโก้ใหม่
+4e682448b1c33286039285efadd98e0ff130c403|~|ff415ee6827c8977e41504d0ed27102afd9c0e3e a2af67916d7bc04a77405919b384f49562e2f370|~|Somchai Prasert|~|somchai@example.com|~|1774111080|~||~|Merge branch 'release/0.6' into develop
+4b5d66561af4956d0a61b9c28801dd84cd3f236a|~|69d2a64467482fe2fcaba3df022f05e15f1b5dd7 a2af67916d7bc04a77405919b384f49562e2f370|~|Somchai Prasert|~|somchai@example.com|~|1774094280|~|tag: v0.6.0|~|Merge branch 'release/0.6'
+a2af67916d7bc04a77405919b384f49562e2f370|~|9282b484424356ad2e21265137819c5ca5720380|~|Somchai Prasert|~|somchai@example.com|~|1774064220|~||~|Update CHANGELOG for 0.6.0
+9282b484424356ad2e21265137819c5ca5720380|~|ff415ee6827c8977e41504d0ed27102afd9c0e3e|~|Somchai Prasert|~|somchai@example.com|~|1774050420|~||~|Bump version to 0.6.0
+ff415ee6827c8977e41504d0ed27102afd9c0e3e|~|9ad54e29af2b189fdd0305d143aada09dfabfa5b 69d395798e0b9b11e33d1b707ab0245f73fbd030|~|Somchai Prasert|~|somchai@example.com|~|1774042500|~||~|Merge pull request #21 from acme/feature/profile
+69d395798e0b9b11e33d1b707ab0245f73fbd030|~|6394792d86ffcbf302711f8507c702b2581c210d|~|Somchai Prasert|~|somchai@example.com|~|1774035660|~||~|Add tests for profile
+9ad54e29af2b189fdd0305d143aada09dfabfa5b|~|e3a5b1503782dc426ff01d24f98b05777d78bf5c fbf05e8a93216be05ae1e8d77d5b61d4af4f66ef|~|Somchai Prasert|~|somchai@example.com|~|1774008960|~||~|Merge pull request #20 from acme/feature/audit-log
+fbf05e8a93216be05ae1e8d77d5b61d4af4f66ef|~|4634ceb34e2e8a4c77d0281b067401f46b41c16e|~|Nattaya Kongsri|~|nattaya@example.com|~|1774005360|~||~|Refactor audit-log into hooks
+4634ceb34e2e8a4c77d0281b067401f46b41c16e|~|d816565609933ec10db91f4819c169f2d7c07972|~|Nattaya Kongsri|~|nattaya@example.com|~|1773977640|~||~|Polish audit-log styles
+6394792d86ffcbf302711f8507c702b2581c210d|~|db3d0dda2839f6dc5fbd969e8aa4475d90d5a6f4|~|Jordan Lee|~|jordan@example.com|~|1773975300|~||~|Add tests for profile
+e3a5b1503782dc426ff01d24f98b05777d78bf5c|~|362b21958c044c892abbe0302e5dfdcd565c7253|~|Jordan Lee|~|jordan@example.com|~|1773948780|~||~|อัปเดต CHANGELOG
+db3d0dda2839f6dc5fbd969e8aa4475d90d5a6f4|~|938d682cb362701c7e91e93f5021dcfd1d35aea2|~|Somchai Prasert|~|somchai@example.com|~|1773917340|~||~|เพิ่มข้อความภาษาไทยใน profile
+d816565609933ec10db91f4819c169f2d7c07972|~|c0b167e500d13baf764f39bc56b13e0c444c5716|~|กมล ใจดี|~|kamol@example.com|~|1773896040|~||~|Wire up audit-log API
+c0b167e500d13baf764f39bc56b13e0c444c5716|~|7d3663564c3b4108961fd5ef1e35bfe5a28e6773|~|Somchai Prasert|~|somchai@example.com|~|1773889500|~||~|ปรับปรุง audit-log ให้โหลดเร็วขึ้น
+938d682cb362701c7e91e93f5021dcfd1d35aea2|~|3a637de22a4a352c64e8da842196ed3a9f204a62|~|Jordan Lee|~|jordan@example.com|~|1773882240|~||~|Add profile component
+7d3663564c3b4108961fd5ef1e35bfe5a28e6773|~|c1073fa46de3abfeafd2045b66034f517ee800e5|~|Alex Rivera|~|alex@example.com|~|1773879840|~||~|เพิ่มข้อความภาษาไทยใน audit-log
+c1073fa46de3abfeafd2045b66034f517ee800e5|~|362b21958c044c892abbe0302e5dfdcd565c7253|~|Somchai Prasert|~|somchai@example.com|~|1773852480|~||~|Wire up audit-log API
+3a637de22a4a352c64e8da842196ed3a9f204a62|~|79d0b674b5a6d49eed526de6b470efab9e3b5ffe|~|กมล ใจดี|~|kamol@example.com|~|1773843120|~||~|เพิ่มข้อความภาษาไทยใน profile
+79d0b674b5a6d49eed526de6b470efab9e3b5ffe|~|362b21958c044c892abbe0302e5dfdcd565c7253|~|Nattaya Kongsri|~|nattaya@example.com|~|1773836040|~||~|แก้ไขบั๊ก profile ตอนไม่มีข้อมูล
+362b21958c044c892abbe0302e5dfdcd565c7253|~|9911df1bf5f70159417686d3d94ecaab098f6ab3 b98ef5a917a87424ea7918189cc62eb3172d325f|~|Somchai Prasert|~|somchai@example.com|~|1773816840|~||~|Merge branch 'hotfix/login-crash-3' into develop
+69d2a64467482fe2fcaba3df022f05e15f1b5dd7|~|0dd5c8f99d3de73728c55712c857f12923f29e11 b98ef5a917a87424ea7918189cc62eb3172d325f|~|Somchai Prasert|~|somchai@example.com|~|1773786120|~|tag: v0.5.1|~|Merge branch 'hotfix/login-crash-3'
+b98ef5a917a87424ea7918189cc62eb3172d325f|~|0dd5c8f99d3de73728c55712c857f12923f29e11|~|Alex Rivera|~|alex@example.com|~|1773763260|~||~|Fix crash when session cookie is missing
+9911df1bf5f70159417686d3d94ecaab098f6ab3|~|b790afc23885cc9f5dada0c817657546eb107eba 781bf207b8efc21eb3547314fff870a7fa3abf9e|~|Somchai Prasert|~|somchai@example.com|~|1773746460|~||~|Merge branch 'release/0.5' into develop
+0dd5c8f99d3de73728c55712c857f12923f29e11|~|a72441ba59b70cfe5124e9a3b8713efbedb35623 781bf207b8efc21eb3547314fff870a7fa3abf9e|~|Somchai Prasert|~|somchai@example.com|~|1773723300|~|tag: v0.5.0|~|Merge branch 'release/0.5'
+781bf207b8efc21eb3547314fff870a7fa3abf9e|~|f4edc2cdfa72b817ac2da71b001500c654dac391|~|Somchai Prasert|~|somchai@example.com|~|1773710280|~||~|Update CHANGELOG for 0.5.0
+f4edc2cdfa72b817ac2da71b001500c654dac391|~|b790afc23885cc9f5dada0c817657546eb107eba|~|Somchai Prasert|~|somchai@example.com|~|1773700620|~||~|Bump version to 0.5.0
+b790afc23885cc9f5dada0c817657546eb107eba|~|0dcbeabeccf277554a45f879c3db75add1f576ee 4dfb55ca38c84513cf9492ea9c654d6e13e06934|~|Somchai Prasert|~|somchai@example.com|~|1773673860|~||~|Merge pull request #19 from acme/feature/payments
+4dfb55ca38c84513cf9492ea9c654d6e13e06934|~|4dea9ffad7a4d8a68002d7a56ac38b06f9f5b923|~|Jordan Lee|~|jordan@example.com|~|1773666720|~||~|Fix payments edge case when the list is empty
+4dea9ffad7a4d8a68002d7a56ac38b06f9f5b923|~|c5cfa90d606bb83ab9a1840404e6bcc868ba97fc|~|Somchai Prasert|~|somchai@example.com|~|1773651060|~||~|Add payments component
+c5cfa90d606bb83ab9a1840404e6bcc868ba97fc|~|656c1cf49c572f3fd1160d6c618c8b37a17f06bf|~|กมล ใจดี|~|kamol@example.com|~|1773649560|~||~|Add payments component
+0dcbeabeccf277554a45f879c3db75add1f576ee|~|a8c1b0accbebb9fa6fc9e7993c5ac17717deef8a fef8155a2f3725620a5e1bff8c0bfdb8b376bc19|~|Somchai Prasert|~|somchai@example.com|~|1773632160|~||~|Merge pull request #18 from acme/feature/i18n-thai
+fef8155a2f3725620a5e1bff8c0bfdb8b376bc19|~|698a5a6feaf4c039896d7b7aaae4db33426de8a7|~|กมล ใจดี|~|kamol@example.com|~|1773613140|~||~|Wire up i18n-thai API
+698a5a6feaf4c039896d7b7aaae4db33426de8a7|~|2195eda2ead8b82021f0f969c6e2d781f40f4f3d a8c1b0accbebb9fa6fc9e7993c5ac17717deef8a|~|Pim Suwan|~|pim@example.com|~|1773595020|~||~|Merge branch 'develop' into feature/i18n-thai
+2195eda2ead8b82021f0f969c6e2d781f40f4f3d|~|f5957b70e959d51912a479cba8babc1f7355aded|~|Pim Suwan|~|pim@example.com|~|1773581700|~||~|Refactor i18n-thai into hooks
+a8c1b0accbebb9fa6fc9e7993c5ac17717deef8a|~|ff9b9c6553cd0e97ae3ea8e716cc7c6246427308|~|กมล ใจดี|~|kamol@example.com|~|1773559980|~||~|Tidy lint warnings
+f5957b70e959d51912a479cba8babc1f7355aded|~|9063db66ed9a0a27cd5c02b0329dbdd354595cbe|~|Jordan Lee|~|jordan@example.com|~|1773538200|~||~|Fix i18n-thai edge case when the list is empty
+656c1cf49c572f3fd1160d6c618c8b37a17f06bf|~|ab2662d9a22e6ebd915b8fce531c5bd6e5b019fb|~|Pim Suwan|~|pim@example.com|~|1773513780|~||~|แก้ไขบั๊ก payments ตอนไม่มีข้อมูล
+9063db66ed9a0a27cd5c02b0329dbdd354595cbe|~|92446afcfa60867d74e0d7620886e5dc2f4cf3bf|~|Pim Suwan|~|pim@example.com|~|1773490380|~||~|ปรับปรุง i18n-thai ให้โหลดเร็วขึ้น
+ab2662d9a22e6ebd915b8fce531c5bd6e5b019fb|~|ff9b9c6553cd0e97ae3ea8e716cc7c6246427308|~|กมล ใจดี|~|kamol@example.com|~|1773479100|~||~|เพิ่มข้อความภาษาไทยใน payments
+92446afcfa60867d74e0d7620886e5dc2f4cf3bf|~|31142f3a29f2142e29101b7280324a0d73da9da2|~|Somchai Prasert|~|somchai@example.com|~|1773477180|~||~|Fix i18n-thai edge case when the list is empty
+31142f3a29f2142e29101b7280324a0d73da9da2|~|ff9b9c6553cd0e97ae3ea8e716cc7c6246427308|~|Pim Suwan|~|pim@example.com|~|1773466740|~||~|ปรับปรุง i18n-thai ให้โหลดเร็วขึ้น
+ff9b9c6553cd0e97ae3ea8e716cc7c6246427308|~|23de97d2717decf13bb460786107a3dc38590f74 cb81a8e46124646879902d64fe0498c2c979f454|~|Somchai Prasert|~|somchai@example.com|~|1773462840|~||~|Merge branch 'release/0.4' into develop
+a72441ba59b70cfe5124e9a3b8713efbedb35623|~|7a521f04d85013737892c1dedd29c08c689c92c2 cb81a8e46124646879902d64fe0498c2c979f454|~|Somchai Prasert|~|somchai@example.com|~|1773434100|~|tag: v0.4.0|~|Merge branch 'release/0.4'
+cb81a8e46124646879902d64fe0498c2c979f454|~|5199cad67f704986213edd032c0d448440537360|~|Somchai Prasert|~|somchai@example.com|~|1773405480|~||~|Update CHANGELOG for 0.4.0
+5199cad67f704986213edd032c0d448440537360|~|23de97d2717decf13bb460786107a3dc38590f74|~|Somchai Prasert|~|somchai@example.com|~|1773391560|~||~|Bump version to 0.4.0
+23de97d2717decf13bb460786107a3dc38590f74|~|1a19c86cad9d9a4400bca50ce40f62e4fcd8b5df 1978db5b499449ebe76f1d3ed0849c2ba4dbbd5b|~|Somchai Prasert|~|somchai@example.com|~|1773374280|~||~|Merge pull request #17 from acme/feature/export-csv
+1978db5b499449ebe76f1d3ed0849c2ba4dbbd5b|~|28e5aaa503b4cff1b4242e5d96539d50c9ff269a|~|Alex Rivera|~|alex@example.com|~|1773368220|~||~|แก้ไขบั๊ก export-csv ตอนไม่มีข้อมูล
+1a19c86cad9d9a4400bca50ce40f62e4fcd8b5df|~|b27827ffc7e229703c876c917cd205abb64c21ba 33148d5273fffd21083caf5bc2b61a052f8b57ac|~|Somchai Prasert|~|somchai@example.com|~|1773356940|~||~|Merge pull request #16 from acme/feature/search
+33148d5273fffd21083caf5bc2b61a052f8b57ac|~|bae086a5fd8aca80095299517e0d9a333fdee3e3|~|Nattaya Kongsri|~|nattaya@example.com|~|1773326100|~||~|Fix search edge case when the list is empty
+28e5aaa503b4cff1b4242e5d96539d50c9ff269a|~|5e20ded035d6c803ea8e6390f23bc964eeca5957|~|Pim Suwan|~|pim@example.com|~|1773304920|~||~|Add tests for export-csv
+bae086a5fd8aca80095299517e0d9a333fdee3e3|~|c9b8f4edf68938d5bf091eeaab7d72604591aadd|~|กมล ใจดี|~|kamol@example.com|~|1773287820|~||~|Fix search edge case when the list is empty
+b27827ffc7e229703c876c917cd205abb64c21ba|~|c8113df58d5c0336b4bd0a2aaacbda7ac99a48dc 030ba41934ca32d180d431de81287b0d2365e96f|~|Somchai Prasert|~|somchai@example.com|~|1773274440|~||~|Merge pull request #15 from acme/feature/i18n-thai
+030ba41934ca32d180d431de81287b0d2365e96f|~|a1ebea3a2fa0b6900fcf670ab61ffbf4823325ec|~|กมล ใจดี|~|kamol@example.com|~|1773245160|~||~|Polish i18n-thai styles
+c9b8f4edf68938d5bf091eeaab7d72604591aadd|~|2fda02efa8eb87aaad335d7a29e3dd28de601c19|~|Nattaya Kongsri|~|nattaya@example.com|~|1773223980|~||~|Fix search edge case when the list is empty
+c8113df58d5c0336b4bd0a2aaacbda7ac99a48dc|~|5e20ded035d6c803ea8e6390f23bc964eeca5957|~|Jordan Lee|~|jordan@example.com|~|1773199680|~||~|Tidy lint warnings
+a1ebea3a2fa0b6900fcf670ab61ffbf4823325ec|~|0b6a95f741727cdf5dd0b27e0dac09baef245ca7 5e20ded035d6c803ea8e6390f23bc964eeca5957|~|Jordan Lee|~|jordan@example.com|~|1773196920|~||~|Merge branch 'develop' into feature/i18n-thai
+0b6a95f741727cdf5dd0b27e0dac09baef245ca7|~|5e20ded035d6c803ea8e6390f23bc964eeca5957|~|Jordan Lee|~|jordan@example.com|~|1773173040|~||~|Fix i18n-thai edge case when the list is empty
+2fda02efa8eb87aaad335d7a29e3dd28de601c19|~|2f2b0c3016f4dad96f43cbf8fb3557eb35511fa4|~|Jordan Lee|~|jordan@example.com|~|1773144060|~||~|แก้ไขบั๊ก search ตอนไม่มีข้อมูล
+2f2b0c3016f4dad96f43cbf8fb3557eb35511fa4|~|5e20ded035d6c803ea8e6390f23bc964eeca5957|~|Nattaya Kongsri|~|nattaya@example.com|~|1773126480|~||~|Polish search styles
+5e20ded035d6c803ea8e6390f23bc964eeca5957|~|4c7804f0cbb2f350ce212a805a86d8dd67ec6bc2|~|กมล ใจดี|~|kamol@example.com|~|1773123180|~||~|ลบ workflow เก่าที่ไม่ได้ใช้แล้ว
+4c7804f0cbb2f350ce212a805a86d8dd67ec6bc2|~|78dbba5d80a7b6ab3c8bbed4c66486dc0f4c1e8c|~|Jordan Lee|~|jordan@example.com|~|1773092460|~||~|Rename app.ts to main-app.ts
+78dbba5d80a7b6ab3c8bbed4c66486dc0f4c1e8c|~|db9fcc7622bc489b93b95f541d3558cfd4b79f29 6bded4a72d428dd739475b575ec0665afc81cbca|~|Somchai Prasert|~|somchai@example.com|~|1773090240|~||~|Merge branch 'release/0.3' into develop
+7a521f04d85013737892c1dedd29c08c689c92c2|~|36b2cd9564396a6d9561690af76232b5b5afc614 6bded4a72d428dd739475b575ec0665afc81cbca|~|Somchai Prasert|~|somchai@example.com|~|1773069300|~|tag: v0.3.0|~|Merge branch 'release/0.3'
+6bded4a72d428dd739475b575ec0665afc81cbca|~|0b93f844f12710a767cfc3ca4f7432066b772369|~|Somchai Prasert|~|somchai@example.com|~|1773066120|~||~|Update CHANGELOG for 0.3.0
+0b93f844f12710a767cfc3ca4f7432066b772369|~|db9fcc7622bc489b93b95f541d3558cfd4b79f29|~|Somchai Prasert|~|somchai@example.com|~|1773054300|~||~|Bump version to 0.3.0
+db9fcc7622bc489b93b95f541d3558cfd4b79f29|~|8818fc00f12d8c7195c05635275e97b9412a941d 34798bf4c181b70b8cf07cb691c048b10b6c0a54|~|Somchai Prasert|~|somchai@example.com|~|1773033780|~||~|Merge pull request #14 from acme/feature/notifications
+34798bf4c181b70b8cf07cb691c048b10b6c0a54|~|b57918c11f07ff6fc64bf43a551ed14d4f07fb54|~|Alex Rivera|~|alex@example.com|~|1773012060|~||~|เพิ่มข้อความภาษาไทยใน notifications
+b57918c11f07ff6fc64bf43a551ed14d4f07fb54|~|7e66412f484d8c63b8820c2adf109747303ee069|~|Jordan Lee|~|jordan@example.com|~|1772998440|~||~|Wire up notifications API
+7e66412f484d8c63b8820c2adf109747303ee069|~|5a93b055fd7ae80a111c04c721c579ba0d300c06|~|Jordan Lee|~|jordan@example.com|~|1772966580|~||~|Polish notifications styles
+5a93b055fd7ae80a111c04c721c579ba0d300c06|~|be52c02b2a2e3d09aa3da914ffa9f724676af740|~|กมล ใจดี|~|kamol@example.com|~|1772963100|~||~|Add notifications component
+8818fc00f12d8c7195c05635275e97b9412a941d|~|22c364f43ba75dc33e6231c9eced3ac53d60e104 46687c01ef4428e3b1042b8034ccc42a970b8b47|~|Somchai Prasert|~|somchai@example.com|~|1772952660|~||~|Merge pull request #13 from acme/feature/dark-mode
+46687c01ef4428e3b1042b8034ccc42a970b8b47|~|ad85f5562a11e63eca678efb6ae87ae14f6a1888|~|Alex Rivera|~|alex@example.com|~|1772921760|~||~|ปรับปรุง dark-mode ให้โหลดเร็วขึ้น
+ad85f5562a11e63eca678efb6ae87ae14f6a1888|~|87c78e7ed80287c80082c518ae68ed92a98003e8|~|Jordan Lee|~|jordan@example.com|~|1772909640|~||~|ปรับปรุง dark-mode ให้โหลดเร็วขึ้น
+87c78e7ed80287c80082c518ae68ed92a98003e8|~|4cfa2e1b191430a0ffb2b4c905a4ebbe11ed6a9d|~|Nattaya Kongsri|~|nattaya@example.com|~|1772906880|~||~|Add tests for dark-mode
+be52c02b2a2e3d09aa3da914ffa9f724676af740|~|22c364f43ba75dc33e6231c9eced3ac53d60e104|~|Alex Rivera|~|alex@example.com|~|1772886060|~||~|Add tests for notifications
+4cfa2e1b191430a0ffb2b4c905a4ebbe11ed6a9d|~|22c364f43ba75dc33e6231c9eced3ac53d60e104|~|Somchai Prasert|~|somchai@example.com|~|1772859180|~||~|เพิ่มข้อความภาษาไทยใน dark-mode
+22c364f43ba75dc33e6231c9eced3ac53d60e104|~|b6c4fde2378e3fa1c0a895d2d16f4dfd1dd7c5cd 2154efbda390800b38009beba55521023f524f80|~|Somchai Prasert|~|somchai@example.com|~|1772845500|~||~|Merge branch 'release/0.2' into develop
+36b2cd9564396a6d9561690af76232b5b5afc614|~|b5a2c5f446208af6773e6daacff2ea68c2f1817b 2154efbda390800b38009beba55521023f524f80|~|Somchai Prasert|~|somchai@example.com|~|1772817780|~|tag: v0.2.0|~|Merge branch 'release/0.2'
+2154efbda390800b38009beba55521023f524f80|~|e270e3cad63a44c5dc11ccb4d4e7a8c2fd9d7bcb|~|Somchai Prasert|~|somchai@example.com|~|1772786340|~||~|Update CHANGELOG for 0.2.0
+e270e3cad63a44c5dc11ccb4d4e7a8c2fd9d7bcb|~|b6c4fde2378e3fa1c0a895d2d16f4dfd1dd7c5cd|~|Somchai Prasert|~|somchai@example.com|~|1772755800|~||~|Bump version to 0.2.0
+b6c4fde2378e3fa1c0a895d2d16f4dfd1dd7c5cd|~|17c7b48da6a9870790165af459c211f66d175c3b fcb56ebd1460f18185a3603fe8a5b92cf0173d0e|~|Somchai Prasert|~|somchai@example.com|~|1772746380|~||~|Merge pull request #12 from acme/feature/dashboard
+fcb56ebd1460f18185a3603fe8a5b92cf0173d0e|~|8206247e688374f44c1e1eef534269b3f66f474c|~|Somchai Prasert|~|somchai@example.com|~|1772737740|~||~|Refactor dashboard into hooks
+8206247e688374f44c1e1eef534269b3f66f474c|~|0157426f43faf1286327562b7a43d3b43eced759 17c7b48da6a9870790165af459c211f66d175c3b|~|กมล ใจดี|~|kamol@example.com|~|1772721120|~||~|Merge branch 'develop' into feature/dashboard
+0157426f43faf1286327562b7a43d3b43eced759|~|fbac980584beace8b0825abc6ac132f29c718f24|~|Alex Rivera|~|alex@example.com|~|1772701020|~||~|Wire up dashboard API
+17c7b48da6a9870790165af459c211f66d175c3b|~|a7bb041c160496bd4dc760fd651b8b7ffaec569b ca23ef8034b64041200312a0f05983fcedabfaac|~|Somchai Prasert|~|somchai@example.com|~|1772679240|~||~|Merge pull request #11 from acme/feature/auth
+ca23ef8034b64041200312a0f05983fcedabfaac|~|ecd39f8ca27355dd93f9f8224a915f6a388335e3|~|Jordan Lee|~|jordan@example.com|~|1772670300|~||~|Add tests for auth
+a7bb041c160496bd4dc760fd651b8b7ffaec569b|~|b5a2c5f446208af6773e6daacff2ea68c2f1817b|~|Alex Rivera|~|alex@example.com|~|1772654820|~||~|Tidy lint warnings
+fbac980584beace8b0825abc6ac132f29c718f24|~|3e5b28ca638f609409d37d98c893d8a81caeaff6|~|Jordan Lee|~|jordan@example.com|~|1772647140|~||~|Fix dashboard edge case when the list is empty
+3e5b28ca638f609409d37d98c893d8a81caeaff6|~|3cf112565f96311d09061a7ea44908953f251975|~|Jordan Lee|~|jordan@example.com|~|1772644020|~||~|Polish dashboard styles
+3cf112565f96311d09061a7ea44908953f251975|~|e930523f07a6bf17a4a4297d710bf7a5c88bf328|~|Nattaya Kongsri|~|nattaya@example.com|~|1772639580|~||~|Fix dashboard edge case when the list is empty
+ecd39f8ca27355dd93f9f8224a915f6a388335e3|~|fe7a8f5736debd5cdcecd67a1fa4c8558e26ca88|~|Somchai Prasert|~|somchai@example.com|~|1772607480|~||~|Wire up auth API
+fe7a8f5736debd5cdcecd67a1fa4c8558e26ca88|~|a812a47e83f065bcaa05a46a939e359466a5637c|~|กมล ใจดี|~|kamol@example.com|~|1772596140|~||~|Add auth component
+a812a47e83f065bcaa05a46a939e359466a5637c|~|3e0de2344be53d501021ea5a0cd617a04a574626|~|กมล ใจดี|~|kamol@example.com|~|1772581020|~||~|ปรับปรุง auth ให้โหลดเร็วขึ้น
+3e0de2344be53d501021ea5a0cd617a04a574626|~|512bacbc17a93be8aea2e7328bc06c7c193800da|~|กมล ใจดี|~|kamol@example.com|~|1772569980|~||~|Wire up auth API
+e930523f07a6bf17a4a4297d710bf7a5c88bf328|~|b5a2c5f446208af6773e6daacff2ea68c2f1817b|~|Somchai Prasert|~|somchai@example.com|~|1772542140|~||~|แก้ไขบั๊ก dashboard ตอนไม่มีข้อมูล
+512bacbc17a93be8aea2e7328bc06c7c193800da|~|b5a2c5f446208af6773e6daacff2ea68c2f1817b|~|Jordan Lee|~|jordan@example.com|~|1772532300|~||~|Refactor auth into hooks
+b5a2c5f446208af6773e6daacff2ea68c2f1817b|~|7d7ffa73abf1942b6b93492eda6d82e4d5cba587|~|Pim Suwan|~|pim@example.com|~|1772500560|~|tag: v0.1.0|~|เพิ่มโลโก้และไอคอนของแอป
+7d7ffa73abf1942b6b93492eda6d82e4d5cba587|~|9d987c22a596807c7ef5f50388d182fb030dd7bd|~|Jordan Lee|~|jordan@example.com|~|1772493000|~||~|Set up CI pipeline
+9d987c22a596807c7ef5f50388d182fb030dd7bd|~|203946d6f4b5a5d2103ffe1ebb427cfab2dae3c7|~|Somchai Prasert|~|somchai@example.com|~|1772461380|~||~|Add project scaffolding and README
+203946d6f4b5a5d2103ffe1ebb427cfab2dae3c7|~||~|Somchai Prasert|~|somchai@example.com|~|1772436180|~||~|Initial commit

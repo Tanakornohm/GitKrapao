@@ -1,0 +1,2 @@
+# ts-rs writes these with LF; keep the checkout identical so regenerating them is a no-op.
+src/bindings/** text eol=lf
