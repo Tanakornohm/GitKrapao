@@ -19,7 +19,7 @@ export interface Commit extends RawCommit {
   row: number; lane: number; color: number; children: number[];
   stashRow?: boolean; stashKey?: string; stashName?: string;
   /** Never set on a commit; lets `detailFor.card` / `.key` tell commits and cards apart. */
-  card?: undefined; key?: undefined;
+  card?: undefined; key?: undefined; stash?: undefined;
 }
 
 /** What the detail panel shows besides a commit. */

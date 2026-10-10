@@ -6,15 +6,31 @@
    side of a diff needs its own lexer. All regexes are sticky or anchored
    with no nested quantifiers, and very long lines are skipped, because file
    contents are untrusted input. */
+/** [start, end, class] in UTF-16 offsets of one line. */
+export type Token = [start: number, end: number, cls: string];
+/** Lexes a file line by line, keeping state (open comments, strings, tags) between lines. */
+export interface Lexer { line(s: string): Token[] }
+
+interface StrSpec { ml?: boolean; esc?: string; dbl?: boolean }
+/** One language family; flags switch on the extra rules `code()` knows. */
+interface Lang {
+  line: string[]; block?: [string, string][]; str: Record<string, StrSpec>; kw: Set<string>; lit: Set<string>;
+  ty?: Set<string>; va?: Set<string>; ident?: RegExp; keyRe?: RegExp; section?: RegExp; vars?: string; deco?: string;
+  ci?: boolean; css?: boolean; dashFn?: boolean; here?: boolean; ivar?: boolean; keys?: boolean; lineStart?: boolean;
+  lineWs?: boolean; macro?: boolean; pre?: boolean; rust?: boolean; sym?: boolean; triple?: boolean; upper?: boolean; verbatim?: boolean;
+}
+/** An open string or comment that may run past the end of the line. */
+interface Open { end: string; c: string; esc: string; dbl?: boolean }
+
 export const Syntax = (() => {
   const MAX_LINE = 2000;
   const CLASSES = new Set(['cm', 'st', 'kw', 'lt', 'nu', 'ty', 'fn', 'at', 'pr', 'tg', 'va', 'hd']);
-  const W = s => new Set(s.split(/\s+/).filter(Boolean));
+  const W = (s: string) => new Set(s.split(/\s+/).filter(Boolean));
   const IDENT = /[A-Za-z_$À-￿][\w$À-￿]*/y;
   const NUM = /(?:0[xXbBoO][\da-fA-F_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)[a-zA-Z%]*/y;
 
-  const C_STR = { '"': {}, "'": {} };
-  const JS = {
+  const C_STR: Record<string, StrSpec> = { '"': {}, "'": {} };
+  const JS: Lang = {
     line: ['//'], block: [['/*', '*/']], str: { ...C_STR, '`': { ml: true } }, upper: true, deco: '@',
     kw: W(`break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof
       let new of return static super switch this throw try typeof var void while with yield async await as implements interface package private
@@ -22,7 +38,7 @@ export const Syntax = (() => {
     lit: W('true false null undefined NaN Infinity'),
     ty: W('string number boolean any unknown never object symbol bigint'),
   };
-  const LANGS = {
+  const LANGS: Record<string, Lang> = {
     js: JS,
     json: { line: ['//'], block: [['/*', '*/']], str: { '"': {} }, keys: true, kw: W(''), lit: W('true false null') },
     cs: {
@@ -123,8 +139,8 @@ export const Syntax = (() => {
     conf: { line: ['#'], lineStart: true, str: {}, kw: W(''), lit: W('') },
   };
 
-  const EXT = {};
-  const ext = (lang, list) => list.split(' ').forEach(e => { EXT[e] = lang; });
+  const EXT: Record<string, string> = {};
+  const ext = (lang: string, list: string) => list.split(' ').forEach(e => { EXT[e] = lang; });
   ext('js', 'js mjs cjs jsx ts tsx mts cts');
   ext('json', 'json jsonc json5 code-workspace');
   ext('cs', 'cs csx');
@@ -143,20 +159,21 @@ export const Syntax = (() => {
   ext('yaml', 'yml yaml');
   ext('ini', 'toml ini cfg conf properties editorconfig env gitconfig');
   ext('md', 'md markdown');
-  const NAMES = {
+  const NAMES: Record<string, string> = {
     dockerfile: 'docker', containerfile: 'docker', makefile: 'conf', '.gitignore': 'conf', '.gitattributes': 'conf',
     '.dockerignore': 'conf', '.npmrc': 'ini', '.editorconfig': 'ini', '.env': 'ini',
   };
-  function lang(path){
-    const name = String(path || '').split('/').pop().toLowerCase();
-    if (NAMES[name]) return NAMES[name];
+  function lang(path: string): string | null{
+    const name = String(path || '').split('/').pop()!.toLowerCase();
+    const known = NAMES[name];
+    if (known) return known;
     if (name.startsWith('.env.') || name.startsWith('dockerfile.')) return name.startsWith('.env.') ? 'ini' : 'docker';
     const dot = name.lastIndexOf('.');
     return dot >= 0 ? EXT[name.slice(dot + 1)] || null : null;
   }
 
   // Index just past the end of an open string or comment, or -1 if it does not end on this line.
-  function closeAt(s, i, st){
+  function closeAt(s: string, i: number, st: Open){
     for (let k = i; k < s.length; k++) {
       if (st.esc && s[k] === st.esc) { k++; continue; }
       if (s.startsWith(st.end, k)) {
@@ -169,26 +186,26 @@ export const Syntax = (() => {
   const RUST_CHAR = /'(?:\\(?:x[\da-fA-F]{2}|u\{[\da-fA-F]{1,6}\}|.)|[^\\'\ud800-\udfff]|[\ud800-\udbff][\udc00-\udfff])'/y;
   const RUST_LIFE = /'[A-Za-z_]\w*/y;
   const WORD = /[\w.]+/y, VAR = /[A-Za-z_]\w*(?::[A-Za-z_]\w*)?/y, CSS_HEX = /#[\da-fA-F]{3,8}(?![\w-])/y, CSS_AT = /[#.]?[\w-]+/y;
-  const at = (re, s, i) => { re.lastIndex = i; const m = re.exec(s); return m ? m[0].length : 0; };
+  const at = (re: RegExp, s: string, i: number) => { re.lastIndex = i; const m = re.exec(s); return m ? m[0].length : 0; };
 
-  function code(L){
+  function code(L: Lang): Lexer{
     const ident = L.ident || IDENT;
-    let st = null, depth = 0;
+    let st: Open | null = null, depth = 0;
     return { line(s){
-      const out = [], n = s.length;
-      const add = (a, b, c) => { if (b > a) out.push([a, b, c]); };
+      const out: Token[] = [], n = s.length;
+      const add = (a: number, b: number, c: string) => { if (b > a) out.push([a, b, c]); };
       if (n > MAX_LINE) { st = null; return out; }
       const first = s.search(/\S/);
       let i = 0;
       // Opens a string or comment at `from`; returns where scanning goes on (n while it stays open).
-      const open = (from, skip, state, ml) => {
+      const open = (from: number, skip: number, state: Open, ml?: boolean) => {
         st = state;
-        const j = closeAt(s, from + skip, st);
-        if (j < 0) { add(from, n, st.c); if (!ml) st = null; return n; }
-        add(from, j, st.c); st = null;
+        const j = closeAt(s, from + skip, state);
+        if (j < 0) { add(from, n, state.c); if (!ml) st = null; return n; }
+        add(from, j, state.c); st = null;
         if (L.keys && state.c === 'st') {
           let k = j; while (s[k] === ' ' || s[k] === '\t') k++;
-          if (s[k] === ':') out[out.length - 1][2] = 'pr';
+          if (s[k] === ':') out[out.length - 1]![2] = 'pr';   // the string just added
         }
         return j;
       };
@@ -197,14 +214,15 @@ export const Syntax = (() => {
         if (j < 0) { add(0, n, st.c); return out; }
         add(0, j, st.c); st = null; i = j;
       } else if (L.keyRe) {
-        if (L.section && L.section.test(s)) { const m = s.match(L.section); add(m[0].length - m[0].trimStart().length, m[0].length, 'tg'); i = m[0].length; }
+        if (L.section && L.section.test(s)) { const m = s.match(L.section)!; add(m[0].length - m[0].trimStart().length, m[0].length, 'tg'); i = m[0].length; }
         else {
+          // keyRe always has two groups: indent and key.
           const m = s.match(L.keyRe);
-          if (m) { const a = m[1].length, key = m[2].trimEnd(); add(a, a + key.length, 'pr'); i = a + m[2].length; }
+          if (m) { const a = m[1]!.length, key = m[2]!.trimEnd(); add(a, a + key.length, 'pr'); i = a + m[2]!.length; }
         }
       }
       while (i < n) {
-        const c = s[i];
+        const c = s[i]!;
         if (c === ' ' || c === '\t') { i++; continue; }
         let hit = false;
         for (const lc of L.line) {
@@ -255,7 +273,7 @@ export const Syntax = (() => {
         const k = at(ident, s, i);
         if (k) {
           const w = s.slice(i, i + k), key = L.ci ? w.toLowerCase() : w, e = i + k;
-          let cls = null;
+          let cls: string | null = null;
           if (L.kw.has(key)) cls = 'kw';
           else if (L.lit.has(key)) cls = 'lt';
           else if (L.ty && L.ty.has(key)) cls = 'ty';
@@ -279,14 +297,14 @@ export const Syntax = (() => {
   }
 
   const ATTR = /[^\s"'<>/=?]+/y, TAG = /<\/?[A-Za-z_][\w:.-]*/y, DECL = /<[!?][\w-]*/y, ENT = /&(?:#\d+|#x[\da-fA-F]+|\w+);/y;
-  function markup(){
+  function markup(): Lexer{
     let st = 'text', q = '';
     return { line(s){
-      const out = [], n = s.length;
-      const add = (a, b, c) => { if (b > a) out.push([a, b, c]); };
+      const out: Token[] = [], n = s.length;
+      const add = (a: number, b: number, c: string) => { if (b > a) out.push([a, b, c]); };
       if (n > MAX_LINE) { st = 'text'; return out; }
       // Closes `end` from i as class c; returns the next index, or n with the state left open.
-      const until = (from, i, end, c, then) => {
+      const until = (from: number, i: number, end: string, c: string, then: string) => {
         const j = s.indexOf(end, i);
         if (j < 0) { add(from, n, c); return n; }
         add(from, j + end.length, c); st = then; return j + end.length;
@@ -296,7 +314,7 @@ export const Syntax = (() => {
         if (st === 'cm') { i = until(i, i, '-->', 'cm', 'text'); continue; }
         if (st === 'cdata') { i = until(i, i, ']]>', 'st', 'text'); continue; }
         if (st === 'val') { i = until(i, i, q, 'st', 'tag'); continue; }
-        const c = s[i];
+        const c = s[i]!;
         if (st === 'tag') {
           if (c === '>') { add(i, i + 1, 'tg'); i++; st = 'text'; continue; }
           if ((c === '/' || c === '?') && s[i + 1] === '>') { add(i, i + 2, 'tg'); i += 2; st = 'text'; continue; }
@@ -318,19 +336,19 @@ export const Syntax = (() => {
   }
 
   const MD_HEAD = /^ {0,3}#{1,6}(?:\s|$)/, MD_FENCE = /^ {0,3}(`{3,}|~{3,})/, MD_LIST = /^\s*(?:[-*+]|\d+[.)])(?=\s)/, MD_QUOTE = /^ {0,3}>/;
-  function markdown(){
+  function markdown(): Lexer{
     let fence = '';
     return { line(s){
-      const out = [], n = s.length;
-      const add = (a, b, c) => { if (b > a) out.push([a, b, c]); };
+      const out: Token[] = [], n = s.length;
+      const add = (a: number, b: number, c: string) => { if (b > a) out.push([a, b, c]); };
       if (n > MAX_LINE) return out;
-      const f = s.match(MD_FENCE);
+      const f = s.match(MD_FENCE), mark = f && f[1]!;   // MD_FENCE has one group, the fence itself
       if (fence) {
-        if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !s.slice(f[0].length).trim()) { add(0, n, 'cm'); fence = ''; }
+        if (f && mark && mark[0] === fence[0] && mark.length >= fence.length && !s.slice(f[0].length).trim()) { add(0, n, 'cm'); fence = ''; }
         else add(0, n, 'st');
         return out;
       }
-      if (f) { add(0, n, 'cm'); fence = f[1]; return out; }
+      if (f) { add(0, n, 'cm'); fence = mark!; return out; }
       if (MD_HEAD.test(s)) { add(0, n, 'hd'); return out; }
       if (MD_QUOTE.test(s)) { add(0, n, 'cm'); return out; }
       let i = 0;
@@ -355,10 +373,11 @@ export const Syntax = (() => {
     } };
   }
 
-  function lexer(name){
+  function lexer(name: string): Lexer | null{
     if (name === 'markup') return markup();
     if (name === 'md') return markdown();
-    return LANGS[name] ? code(LANGS[name]) : null;
+    const L = LANGS[name];
+    return L ? code(L) : null;
   }
   return { lang, lexer, CLASSES, MAX_LINE };
 })();

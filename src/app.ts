@@ -1,6 +1,11 @@
 import { Syntax } from './highlight';
+import type { Token } from './highlight';
+import type { CommitDetail } from './bindings/CommitDetail';
+import type { FileChange } from './bindings/FileChange';
+import type { FileDiff } from './bindings/FileDiff';
+import type { DiffKind } from './ipc';
 import { invoke, NATIVE } from './ipc';
-import type { AppState, Commit, Edge, Layout, RawCommit, RefGroup, Shown } from './types';
+import type { AppState, Card, Commit, Edge, Layout, RawCommit, RefGroup, Shown } from './types';
 import type { Refs } from './bindings/Refs';
 import type { RepoInfo } from './bindings/RepoInfo';
 import type { Stash } from './bindings/Stash';
@@ -804,18 +809,21 @@ function renderDetail(c: Commit){
    Full message and changed files come from `git show` when a commit is
    selected. Arrow-key browsing waits briefly so only the commit it stops on
    is fetched; results are cached since commits never change. */
-const detailCache = new Map(), DETAIL_CACHE = 300;
+const detailCache = new Map<string, CommitDetail>(), DETAIL_CACHE = 300;
 let detailSeq = 0, detailTimer = 0;
-function requestDetail(c){
+/** A commit or a stash card: both list the files of a commit. */
+type DetailSource = Commit | Extract<Card, { card: 'stash' }>;
+function requestDetail(c: DetailSource){
   if (!NATIVE || !current) return;
   const key = current.path + '\n' + c.hash, seq = ++detailSeq;
   clearTimeout(detailTimer);
-  if (detailCache.has(key)) { fillDetail(c, detailCache.get(key)); return; }
+  if (detailCache.has(key)) { fillDetail(c, detailCache.get(key)!); return; }
   detailTimer = setTimeout(async () => {
     try {
-      const d = await invoke('commit_detail', { path: current.path, sha: c.hash });
+      // Read when the timer fires (as before); a closed repo throws into the catch below.
+      const d = await invoke('commit_detail', { path: current!.path, sha: c.hash });
       detailCache.set(key, d);
-      if (detailCache.size > DETAIL_CACHE) detailCache.delete(detailCache.keys().next().value);
+      if (detailCache.size > DETAIL_CACHE) detailCache.delete(detailCache.keys().next().value!);
       if (seq === detailSeq) fillDetail(c, d);
     } catch (e) {
       const box = $('#dFiles');
@@ -823,14 +831,14 @@ function requestDetail(c){
     }
   }, 100);
 }
-function fillDetail(c, d){
+function fillDetail(c: DetailSource, d: CommitDetail){
   const body = $('#dBody'), box = $('#dFiles');
   if (!box || detailFor !== c) return;
   // %B starts with the subject paragraph, which the heading already shows.
   const cut = d.body.search(/\n\s*\n/);
   const rest = cut < 0 ? '' : d.body.slice(cut).trim();
   body.innerHTML = rest ? `<div class="d-body">${esc(rest)}</div>` : '';
-  panelFiles = d.files.map(f => ({ kind: 'commit', sha: c.hash, path: f.path, oldPath: f.oldPath, status: f.status }));
+  panelFiles = d.files.map(f => ({ kind: 'commit' as const, sha: c.hash, path: f.path, oldPath: f.oldPath, status: f.status }));
   if (!d.totalFiles) { box.innerHTML = '<p class="muted">No file changes</p>'; return; }
   box.innerHTML =
     `<div class="d-files-head"><span>${d.totalFiles.toLocaleString('en')} ${d.totalFiles === 1 ? 'file' : 'files'} changed</span>`
@@ -841,7 +849,7 @@ function fillDetail(c, d){
     + (d.totalFiles > d.files.length ? `<p class="muted note">and ${(d.totalFiles - d.files.length).toLocaleString('en')} more files</p>` : '');
   markDiffRow();
 }
-function fileRow(f, i){
+function fileRow(f: FileChange, i: number){
   const slash = f.path.lastIndexOf('/');
   const dir = f.path.slice(0, slash + 1), name = f.path.slice(slash + 1);
   const full = (f.oldPath ? f.oldPath + ' → ' : '') + f.path;
@@ -851,7 +859,7 @@ function fileRow(f, i){
     + `<span class="ns">${stat}</span></li>`;
 }
 
-async function copyText(text, btn){
+async function copyText(text: string, btn?: HTMLElement | null){
   let ok = false;
   try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
     const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
@@ -867,14 +875,31 @@ async function copyText(text, btn){
    fetched fresh and follow WIP polls. */
 const diffPane = $('#diff'), dfBody = $('#dfBody');
 const DIFF_MAX_LINES = 20000, DF_CACHE = 100, HL_MAX_CHARS = 2000000;
-const dfCache = new Map();
-let panelFiles = [];         // files the detail card lists right now, as diff targets
-let dfList = [], dfAt = -1, dfSeq = 0;
-let dfPrefs = { split: false, full: false, ...lsJSON('lanes.diff', {}) };
+/** A file the detail card lists: of a commit (or stash), or of the work tree (WIP card). */
+type WipSide = 'staged' | 'unstaged' | 'untracked' | 'conflict';
+type DiffTarget =
+  | { kind: 'commit'; sha: string; path: string; oldPath: string | null; status: string; side?: undefined }
+  | { kind: 'wip'; side: WipSide; path: string; oldPath: string | null; status: string; sha?: undefined };
+interface DiffLine {
+  t: 'add' | 'del' | 'ctx'; o?: number; n?: number; s: string; noeol?: boolean;
+  /** Changed part, in code points (markWords). */
+  mark?: [number, number];
+  /** Syntax tokens of the old / new side (highlightDiff). */
+  ho?: Token[] | null; hn?: Token[] | null;
+}
+interface Hunk { head: string; lines: DiffLine[] }
+interface ParsedDiff { hunks: Hunk[]; binary: boolean; meta: string[]; add: number; del: number }
+type LineToks = Map<number, { s: string; t: Token[] }>;
+/** A file_diff result; `tok` caches the whole-file colors on the cached object. */
+type DiffResult = FileDiff & { tok?: { old: LineToks; neu: LineToks } | null };
+const dfCache = new Map<string, DiffResult>();
+let panelFiles: DiffTarget[] = [];         // files the detail card lists right now, as diff targets
+let dfList: DiffTarget[] = [], dfAt = -1, dfSeq = 0;
+let dfPrefs = { split: false, full: false, ...lsJSON<{ split?: boolean; full?: boolean }>('lanes.diff', {}) };
 const diffOpen = () => !diffPane.hidden;
-const dfKey = f => f ? [f.kind, f.sha || '', f.side || '', f.oldPath || '', f.path].join('|') : '';
+const dfKey = (f: DiffTarget | undefined) => f ? [f.kind, f.sha || '', f.side || '', f.oldPath || '', f.path].join('|') : '';
 
-function openDiff(i){
+function openDiff(i: number){
   if (!panelFiles[i]) return;
   dfList = panelFiles; dfAt = i;
   diffPane.hidden = false;
@@ -888,7 +913,7 @@ function closeDiff(){
   diffPane.hidden = true; dfAt = -1; dfSeq++;
   markDiffRow();
 }
-function stepDiff(d){
+function stepDiff(d: number){
   const i = dfAt + d;
   if (i < 0 || i >= dfList.length) return;
   dfAt = i; markDiffRow(); loadDiff();
@@ -923,14 +948,15 @@ async function loadDiff(quiet = false){
     dfBody.innerHTML = '<p class="df-note">This file has a merge conflict. Resolve it in your editor; GitKrapao does not show conflict diffs.</p>';
     return;
   }
-  const kind = f.kind === 'commit' ? 'commit' : f.side;
+  // A WIP file always has a side, and conflicts returned above.
+  const kind: DiffKind = f.kind === 'commit' ? 'commit' : f.side as Exclude<WipSide, 'conflict'>;
   const repo = current.path;
-  const get = async context => {
+  const get = async (context: number): Promise<DiffResult> => {
     const key = kind === 'commit' ? [repo, f.sha, f.oldPath || '', f.path, context].join('\n') : null;
-    let r = key && dfCache.get(key);
-    if (r) return r;
-    r = await invoke('file_diff', { path: repo, kind, sha: f.sha || null, file: f.path, oldFile: f.oldPath || null, context });
-    if (key) { dfCache.set(key, r); if (dfCache.size > DF_CACHE) dfCache.delete(dfCache.keys().next().value); }
+    const hit = key ? dfCache.get(key) : undefined;
+    if (hit) return hit;
+    const r: DiffResult = await invoke('file_diff', { path: repo, kind, sha: f.sha || null, file: f.path, oldFile: f.oldPath || null, context });
+    if (key) { dfCache.set(key, r); if (dfCache.size > DF_CACHE) dfCache.delete(dfCache.keys().next().value!); }
     return r;
   };
   // In Changes mode a hunk can start inside a docstring or code fence, so the
@@ -939,17 +965,17 @@ async function loadDiff(quiet = false){
   const prime = !dfPrefs.full && kind !== 'untracked' && !'AD?'.includes(f.status)
     && !!(Syntax.lang(f.path) || (f.oldPath && Syntax.lang(f.oldPath)));
   const loading = !quiet && setTimeout(() => { if (seq === dfSeq) dfBody.innerHTML = '<p class="df-note">Loading…</p>'; }, 0);
-  let r, whole = null;
+  let r: DiffResult, whole: DiffResult | null = null;
   dfBusy = seq;
   try {
     [r, whole] = await Promise.all([get(dfPrefs.full ? 1000000 : 3), prime ? get(1000000).catch(() => null) : null]);
   } catch (e) {
-    clearTimeout(loading);
+    clearTimeout(loading || undefined);
     if (dfBusy === seq) dfBusy = 0;
     if (seq === dfSeq && !quiet) dfBody.innerHTML = `<p class="df-note err">${esc(String(e))}</p>`;
     return;
   }
-  clearTimeout(loading);
+  clearTimeout(loading || undefined);
   if (dfBusy === seq) dfBusy = 0;
   if (seq !== dfSeq) return;
   const shown = [dfKey(f), dfPrefs.split, dfPrefs.full, r.patch].join('\n');
@@ -961,21 +987,21 @@ async function loadDiff(quiet = false){
 }
 // A WIP poll: the open work tree diff may have changed even when git status did not.
 function refreshWipDiff(){
-  if (!dfBusy && diffOpen() && dfList[dfAt] && dfList[dfAt].kind === 'wip') loadDiff(true);
+  if (!dfBusy && diffOpen() && dfList[dfAt]?.kind === 'wip') loadDiff(true);
 }
 
 /* Unified diff text → hunks of lines with old/new numbers. Handles CRLF,
    "\ No newline at end of file", binary files and changes without hunks
    (mode only, pure renames, submodules). */
-function parseDiff(text){
-  const d = { hunks: [], binary: false, meta: [], add: 0, del: 0 };
-  let h = null, o = 0, n = 0;
+function parseDiff(text: string): ParsedDiff{
+  const d: ParsedDiff = { hunks: [], binary: false, meta: [], add: 0, del: 0 };
+  let h: Hunk | null = null, o = 0, n = 0;
   for (let line of text.split('\n')) {
     if (line.endsWith('\r')) line = line.slice(0, -1);
     if (line.startsWith('@@ ')) {
       const m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/);
       if (!m) { h = null; continue; }
-      o = +m[1]; n = +m[2];
+      o = +m[1]!; n = +m[2]!;
       h = { head: line, lines: [] }; d.hunks.push(h);
       continue;
     }
@@ -997,16 +1023,16 @@ function parseDiff(text){
 
 /* A run of removed lines followed by added lines is a change; pair them up
    and mark what changed inside each pair (common start and end trimmed). */
-function pairLines(lines){
+function pairLines(lines: DiffLine[]){
   for (let i = 0; i < lines.length;) {
-    if (lines[i].t !== 'del') { i++; continue; }
-    let j = i; while (j < lines.length && lines[j].t === 'del') j++;
-    let k = j; while (k < lines.length && lines[k].t === 'add') k++;
-    for (let q = 0; q < Math.min(j - i, k - j); q++) markWords(lines[i + q], lines[j + q]);
+    if (lines[i]!.t !== 'del') { i++; continue; }
+    let j = i; while (j < lines.length && lines[j]!.t === 'del') j++;
+    let k = j; while (k < lines.length && lines[k]!.t === 'add') k++;
+    for (let q = 0; q < Math.min(j - i, k - j); q++) markWords(lines[i + q]!, lines[j + q]!);
     i = k;
   }
 }
-function markWords(a, b){
+function markWords(a: DiffLine, b: DiffLine){
   const x = [...a.s], y = [...b.s];
   let pre = 0; while (pre < x.length && pre < y.length && x[pre] === y[pre]) pre++;
   let suf = 0; while (suf < x.length - pre && suf < y.length - pre && x[x.length - 1 - suf] === y[y.length - 1 - suf]) suf++;
@@ -1018,7 +1044,7 @@ function markWords(a, b){
    removed line never colors the added lines after it. With the whole file's
    diff (`whole`) each line takes the colors of its line number in the old or
    new file; without it lexer state starts fresh at every hunk. */
-function lexSides(d, langOld, langNew, each){
+function lexSides(d: ParsedDiff, langOld: string | null, langNew: string | null, each: (l: DiffLine, ho: Token[] | null, hn: Token[] | null) => void){
   let lines = 0, chars = 0;
   for (const h of d.hunks) {
     const o = langOld && Syntax.lexer(langOld), n = langNew && Syntax.lexer(langNew);
@@ -1030,43 +1056,45 @@ function lexSides(d, langOld, langNew, each){
   return true;
 }
 // Old/new line number → { s, t } from the whole-file diff; kept on the (cached) result.
-function wholeTokens(r, langOld, langNew){
+function wholeTokens(r: DiffResult, langOld: string | null, langNew: string | null){
   if (r.tok !== undefined) return r.tok;
   r.tok = null;
   if (r.truncated || r.patch.length > HL_MAX_CHARS) return null;
-  const old = new Map(), neu = new Map();
+  const old: LineToks = new Map(), neu: LineToks = new Map();
+  // Old-side tokens exist only for lines with an old number, new-side ones with a new number.
   const done = lexSides(parseDiff(r.patch), langOld, langNew, (l, ho, hn) => {
-    if (ho) old.set(l.o, { s: l.s, t: ho });
-    if (hn) neu.set(l.n, { s: l.s, t: hn });
+    if (ho) old.set(l.o!, { s: l.s, t: ho });
+    if (hn) neu.set(l.n!, { s: l.s, t: hn });
   });
   if (done) r.tok = { old, neu };   // a file too big to color whole falls back to per-hunk state
   return r.tok;
 }
-function highlightDiff(d, f, whole){
+function highlightDiff(d: ParsedDiff, f: DiffTarget, whole: DiffResult | null){
   const langNew = Syntax.lang(f.path), langOld = f.oldPath ? Syntax.lang(f.oldPath) : langNew;
   if (!langNew && !langOld) return;
   const w = whole && wholeTokens(whole, langOld, langNew);
   if (!w) { lexSides(d, langOld, langNew, (l, ho, hn) => { l.ho = ho; l.hn = hn; }); return; }
-  const pick = (m, k, s) => { const x = m.get(k); return x && x.s === s ? x.t : null; };
+  const pick = (m: LineToks, k: number, s: string) => { const x = m.get(k); return x && x.s === s ? x.t : null; };
+  // Non-added lines have an old number, non-removed lines a new one.
   for (const h of d.hunks) for (const l of h.lines) {
-    if (l.t !== 'add') l.ho = pick(w.old, l.o, l.s);
-    if (l.t !== 'del') l.hn = pick(w.neu, l.n, l.s);
+    if (l.t !== 'add') l.ho = pick(w.old, l.o!, l.s);
+    if (l.t !== 'del') l.hn = pick(w.neu, l.n!, l.s);
   }
 }
 // Code point index (what markWords counts) → UTF-16 index (what the lexers count).
-function unitAt(s, cp){
+function unitAt(s: string, cp: number){
   let u = 0;
-  for (let c = 0; c < cp && u < s.length; c++) u += s.codePointAt(u) > 0xffff ? 2 : 1;
+  for (let c = 0; c < cp && u < s.length; c++) u += s.codePointAt(u)! > 0xffff ? 2 : 1;
   return u;
 }
 // side 'o' or 'n' picks the old or new side's colors (context lines have both).
-function codeHtml(l, side){
+function codeHtml(l: DiffLine, side: 'o' | 'n'){
   const s = l.s, toks = (side === 'o' ? l.ho : l.hn) || [];
   let html = '', ti = 0;
   // [a, b) of the line split at token edges; text is always escaped.
-  const piece = (a, b) => {
+  const piece = (a: number, b: number) => {
     while (a < b) {
-      while (ti < toks.length && toks[ti][1] <= a) ti++;
+      while (ti < toks.length && toks[ti]![1] <= a) ti++;
       const t = toks[ti];
       if (!t || t[0] >= b) { html += esc(s.slice(a, b)); return; }
       if (t[0] > a) { html += esc(s.slice(a, t[0])); a = t[0]; }
@@ -1085,32 +1113,33 @@ function codeHtml(l, side){
 
 function diffNav(){
   $('#dfPos').textContent = `${dfAt + 1} / ${dfList.length}`;
-  $('#dfPrev').disabled = dfAt <= 0; $('#dfNext').disabled = dfAt >= dfList.length - 1;
+  $<HTMLButtonElement>('#dfPrev').disabled = dfAt <= 0; $<HTMLButtonElement>('#dfNext').disabled = dfAt >= dfList.length - 1;
 }
-function diffBar(f, d){
+const ST_SHOWN_AS: Record<string, string> = { '?': 'A', '!': 'D' };
+function diffBar(f: DiffTarget, d: ParsedDiff | null){
   const slash = f.path.lastIndexOf('/');
-  $('#dfSt').className = 'st st-' + ({ '?': 'A', '!': 'D' }[f.status] || f.status);
+  $('#dfSt').className = 'st st-' + (ST_SHOWN_AS[f.status] || f.status);
   $('#dfSt').textContent = f.status;
   $('#dfPath').innerHTML = (f.oldPath && f.oldPath !== f.path ? `<span class="from">${esc(f.oldPath)} → </span>` : '')
     + `<span class="dir">${esc(f.path.slice(0, slash + 1))}</span>${esc(f.path.slice(slash + 1))}`;
   $('#dfPath').title = f.path;
   $('#dfStat').innerHTML = d && !d.binary ? `<span class="add">+${d.add.toLocaleString('en')}</span> <span class="del">−${d.del.toLocaleString('en')}</span>` : '';
   diffNav();
-  diffPane.querySelectorAll('[data-df-view]').forEach(b => b.classList.toggle('on', (b.dataset.dfView === 'split') === dfPrefs.split));
-  diffPane.querySelectorAll('[data-df-ctx]').forEach(b => b.classList.toggle('on', (b.dataset.dfCtx === 'full') === dfPrefs.full));
+  diffPane.querySelectorAll<HTMLElement>('[data-df-view]').forEach(b => b.classList.toggle('on', (b.dataset.dfView === 'split') === dfPrefs.split));
+  diffPane.querySelectorAll<HTMLElement>('[data-df-ctx]').forEach(b => b.classList.toggle('on', (b.dataset.dfCtx === 'full') === dfPrefs.full));
 }
 
-function renderDiff(f, r, whole){
+function renderDiff(f: DiffTarget, r: DiffResult, whole: DiffResult | null){
   const d = parseDiff(r.patch);
   diffBar(f, d);
-  const note = t => `<p class="df-note">${t}</p>`;
+  const note = (t: string) => `<p class="df-note">${t}</p>`;
   if (d.binary) { dfBody.innerHTML = note('Binary file: no text to compare.'); return; }
   if (!d.hunks.length) {
     const m = d.meta.join('\n');
     let t = 'No changes to show.';
     if (/^Large file/m.test(m)) t = esc(d.meta.find(x => x.startsWith('Large file'))) + '.';
     else if (/rename from/.test(m)) t = 'Renamed without changes.';
-    else if (/old mode/.test(m)) t = 'Only the file mode changed (' + esc(m.match(/old mode (\d+)/)[1]) + ' → ' + esc((m.match(/new mode (\d+)/) || [, '?'])[1]) + ').';
+    else if (/old mode/.test(m)) t = 'Only the file mode changed (' + esc(m.match(/old mode (\d+)/)![1]) + ' → ' + esc((m.match(/new mode (\d+)/) || [, '?'])[1]) + ').';
     else if (/new file mode/.test(m)) t = 'New empty file.';
     else if (/deleted file mode/.test(m)) t = 'Deleted an empty file.';
     dfBody.innerHTML = note(t);
@@ -1120,7 +1149,7 @@ function renderDiff(f, r, whole){
   const nums = Math.max(1, ...d.hunks.flatMap(h => h.lines.map(l => Math.max(l.o || 0, l.n || 0))));
   dfBody.style.setProperty('--nw', String(nums).length + 1 + 'ch');
   let count = 0, cut = false, html = '';
-  const sign = { add: '+', del: '−', ctx: ' ' };
+  const sign: Record<DiffLine['t'], string> = { add: '+', del: '−', ctx: ' ' };
   for (const h of d.hunks) {
     if (cut) break;
     html += `<div class="df-hunk">${esc(h.head)}</div>`;
@@ -1133,11 +1162,11 @@ function renderDiff(f, r, whole){
     }
     // Split: context on both sides; removed lines left, added right, side by side.
     for (let i = 0; i < h.lines.length && !cut;) {
-      const l = h.lines[i];
-      const cell = (x, side) => x ? `<span class="no">${side === 'l' ? x.o : x.n}</span><span class="code t-${x.t}">${codeHtml(x, side === 'l' ? 'o' : 'n')}</span>` : '<span class="no"></span><span class="code none"></span>';
+      const l = h.lines[i]!;
+      const cell = (x: DiffLine | undefined, side: 'l' | 'r') => x ? `<span class="no">${side === 'l' ? x.o : x.n}</span><span class="code t-${x.t}">${codeHtml(x, side === 'l' ? 'o' : 'n')}</span>` : '<span class="no"></span><span class="code none"></span>';
       if (l.t === 'ctx') { html += `<div class="df-row">${cell(l, 'l')}${cell(l, 'r')}</div>`; i++; count++; continue; }
-      let j = i; while (j < h.lines.length && h.lines[j].t === 'del') j++;
-      let k = j; while (k < h.lines.length && h.lines[k].t === 'add') k++;
+      let j = i; while (j < h.lines.length && h.lines[j]!.t === 'del') j++;
+      let k = j; while (k < h.lines.length && h.lines[k]!.t === 'add') k++;
       const dels = h.lines.slice(i, j), adds = h.lines.slice(j, k);
       for (let q = 0; q < Math.max(dels.length, adds.length); q++) {
         if (++count > DIFF_MAX_LINES) { cut = true; break; }
@@ -1155,10 +1184,10 @@ function renderDiff(f, r, whole){
 $('#dfBack').addEventListener('click', closeDiff);
 $('#dfPrev').addEventListener('click', () => stepDiff(-1));
 $('#dfNext').addEventListener('click', () => stepDiff(1));
-diffPane.querySelectorAll('[data-df-view]').forEach(b => b.addEventListener('click', () => {
+diffPane.querySelectorAll<HTMLElement>('[data-df-view]').forEach(b => b.addEventListener('click', () => {
   dfPrefs.split = b.dataset.dfView === 'split'; lsSet('lanes.diff', JSON.stringify(dfPrefs)); loadDiff();
 }));
-diffPane.querySelectorAll('[data-df-ctx]').forEach(b => b.addEventListener('click', () => {
+diffPane.querySelectorAll<HTMLElement>('[data-df-ctx]').forEach(b => b.addEventListener('click', () => {
   dfPrefs.full = b.dataset.dfCtx === 'full'; lsSet('lanes.diff', JSON.stringify(dfPrefs)); loadDiff();
 }));
 
