@@ -1,12 +1,14 @@
 (() => {
 'use strict';
-const ROW_H = 34, LANE_W = 24, PAD = 12, R = 11, DOT = 5.5;
+const ROW_H = 38, LANE_W = 30, PAD = 16, R = 11, DOT = 5.5;   // ROW_H = --rowh in app.css
 // History loads a page at a time; the next page is fetched once the viewport
 // gets within PREFETCH rows of the end of what is loaded.
 const PAGE = 5000, PREFETCH = 2000, POLL_MS = 3000;
 const HEAD_H = 30, OVERSCAN = 6, TILE = 256;
 const NODE_FONT = "600 9px system-ui,-apple-system,'Segoe UI','Noto Sans Thai','Leelawadee UI',Roboto,sans-serif";
-const PALETTE = ['#19bfe6','#3f7cf6','#a454f0','#e341c3','#ff4d6a','#ff8c32','#f2c230','#62cc4a','#25cfa4'];
+// Lane colors; each theme sets its own in the CSS token --lanes (readTheme).
+// The light theme uses darker shades so lines stand out from a white page.
+let PALETTE = ['#17abd4','#3f7cf6','#a454f0','#e341c3','#ff4d6a','#ff8c32','#f2c230','#62cc4a','#25cfa4'];
 const laneCol = i => PALETTE[i % PALETTE.length];
 const lx = l => PAD + R + l * LANE_W;
 const ry = r => r * ROW_H + ROW_H / 2;
@@ -21,10 +23,14 @@ const lsJSON = (k, d) => { try { return JSON.parse(lsGet(k)) ?? d; } catch (e) {
 const core = window.__TAURI__ && window.__TAURI__.core;
 const NATIVE = !!core;
 
+const luminance = hex => {   // WCAG relative luminance of #rrggbb
+  const n = parseInt(hex.slice(1), 16), ch = v => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * ch((n >> 16) & 255) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255);
+};
+// Dark or white text, whichever contrasts more with the fill.
 function textOn(hex){
-  const n = parseInt(hex.slice(1), 16);
-  const y = (0.299*((n>>16)&255) + 0.587*((n>>8)&255) + 0.114*(n&255)) / 255;
-  return y > 0.62 ? '#15181d' : '#ffffff';
+  const l = luminance(hex) + 0.05;
+  return l / (luminance('#15181d') + 0.05) >= 1.05 / l ? '#15181d' : '#ffffff';
 }
 function initials(name){
   const p = String(name || '').trim().split(/\s+/).filter(Boolean);
@@ -353,11 +359,27 @@ moreRow.hidden = true;
 const pool = new Map();      // row index -> row element currently in the DOM
 let tiles = [];              // tiles[t] = edges touching rows [t*TILE, (t+1)*TILE)
 let stamp = 0, drawQueued = false, theme = null;
-const ON_COL = PALETTE.map(textOn);
+let ON_COL = PALETTE.map(textOn);
 
+/* Returns true when the lane palette changed (rows, panel and card then need redrawing). */
 function readTheme(){
   const cs = getComputedStyle(document.documentElement);
   theme = { stroke: cs.getPropertyValue('--node-stroke').trim(), ring: cs.getPropertyValue('--text').trim(), muted: cs.getPropertyValue('--text-3').trim() };
+  const lanes = cs.getPropertyValue('--lanes').split(',').map(s => s.trim().toLowerCase());
+  if (lanes.length !== PALETTE.length || !lanes.every(c => /^#[0-9a-f]{6}$/.test(c)) || lanes.join() === PALETTE.join()) return false;
+  PALETTE = lanes; ON_COL = PALETTE.map(textOn);
+  return true;
+}
+// Theme switched: the canvas repaints on its own; DOM built with lane colors is rebuilt.
+function applyTheme(){
+  if (readTheme()) {
+    for (const el of pool.values()) el.remove();
+    pool.clear();
+    renderSide();
+    if (detailFor && !detailFor.card) renderDetail(detailFor);
+    else if (detailFor && (detailFor.card === 'stash' || detailFor.card === 'pr')) refreshCard();
+    draw();   // now, so the rows are never missing for a frame
+  } else scheduleDraw();
 }
 
 function nodeR(c){ return c.parents.length > 1 ? DOT : R; }
@@ -2237,9 +2259,9 @@ $('#themeBtn').addEventListener('click', () => {
   const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   const next = cur === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next; lsSet('lanes.theme', next);
-  readTheme(); scheduleDraw();
+  applyTheme();
 });
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); scheduleDraw(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
 wrap.addEventListener('scroll', scheduleDraw, { passive: true });
 new ResizeObserver(scheduleDraw).observe(wrap);
