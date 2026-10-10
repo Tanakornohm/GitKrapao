@@ -1,7 +1,9 @@
 import { Syntax } from './highlight';
 import { invoke, NATIVE } from './ipc';
-import type { AppState, Commit, Edge, Layout, RawCommit, RefGroup } from './types';
+import type { AppState, Commit, Edge, Layout, RawCommit, RefGroup, Shown } from './types';
 import type { Refs } from './bindings/Refs';
+import type { RepoInfo } from './bindings/RepoInfo';
+import type { Stash } from './bindings/Stash';
 
 (() => {
 'use strict';
@@ -331,22 +333,25 @@ function traceEdge(ctx: CanvasRenderingContext2D, e: Edge, n: number, Y: (y: num
 
 /* ---------- state ---------- */
 let S: AppState = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
-let sel = -1, matches = [], matchPtr = -1, matchSet = null;
+let sel = -1, matches: number[] = [], matchPtr = -1, matchSet: Set<number> | null = null;
 const wrap = $('#wrap'), grid = $('#grid'), body = $('#body'), detail = $('#detail');
 /* Column widths in px. graph null = wide enough for every lane; msg null =
    fill the space left over. Saved per viewer. */
+interface Cols { ref: number; graph: number | null; msg: number | null; date: number }
+type ColKey = keyof Cols;
 const COLS = {
   ref:   { min: 90, max: 600,  reset: () => (window.innerWidth < 600 ? 130 : 210) },
   graph: { min: 40, max: 8000, reset: () => null },
   msg:   { min: 140, max: 4000, reset: () => null },
   date:  { min: 60, max: 320,  reset: () => 160 },
-};
-const cols = { ref: +lsGet('lanes.refw') || COLS.ref.reset(), graph: null, msg: null, date: 160, ...lsJSON('lanes.cols', {}) };
+} satisfies Record<ColKey, { min: number; max: number; reset: () => number | null }>;
+const cols: Cols = { ref: +lsGet('lanes.refw')! || COLS.ref.reset(), graph: null, msg: null, date: 160, ...lsJSON<Partial<Cols>>('lanes.cols', {}) };
 // 120 was the default for the old relative date ("3 days ago"), too narrow for yyyy-MM-dd HH:mm:ss
 if (cols.date === 120) cols.date = COLS.date.reset();
-for (const k of Object.keys(COLS)) {
-  const v = cols[k];
-  if (v !== null && !(Number.isFinite(v) && v >= COLS[k].min && v <= COLS[k].max)) cols[k] = COLS[k].reset();
+for (const k of Object.keys(COLS) as ColKey[]) {
+  // Saved widths come from localStorage, so check each one; ref/date reset to a number.
+  const all = cols as Record<ColKey, number | null>, v = all[k];
+  if (v !== null && !(Number.isFinite(v) && v >= COLS[k].min && v <= COLS[k].max)) all[k] = COLS[k].reset();
 }
 const saveCols = () => lsSet('lanes.cols', JSON.stringify(cols));
 const graphColW = () => cols.graph || S.graphW || 0;
@@ -368,9 +373,11 @@ const moreRow = document.createElement('div');
 moreRow.className = 'more-row';
 moreRow.textContent = 'Loading more commits…';
 moreRow.hidden = true;
-const pool = new Map();      // row index -> row element currently in the DOM
-let tiles = [];              // tiles[t] = edges touching rows [t*TILE, (t+1)*TILE)
-let stamp = 0, drawQueued = false, theme = null;
+const pool = new Map<number, HTMLDivElement>();      // row index -> row element currently in the DOM
+let tiles: Edge[][] = [];    // tiles[t] = edges touching rows [t*TILE, (t+1)*TILE)
+interface Theme { stroke: string; ring: string; muted: string }
+// Read by render() before anything is drawn.
+let stamp = 0, drawQueued = false, theme: Theme | null = null;
 let ON_COL = PALETTE.map(textOn);
 
 /* Returns true when the lane palette changed (rows, panel and card then need redrawing). */
@@ -395,10 +402,10 @@ function applyTheme(){
   } else scheduleDraw();
 }
 
-function nodeR(c){ return c.parents.length > 1 ? DOT : R; }
+function nodeR(c: Commit){ return c.parents.length > 1 ? DOT : R; }
 
 // k: the label's index in its commit's groups (graph labels; the branch menu reads it).
-function pill(g, col, k){
+function pill(g: RefGroup, col: string, k?: number){
   const isHead = g.head;
   const style = isHead ? `--c:${col};background:${col};color:${textOn(col)}` : `--c:${col};background:${col}2e`;
   const icons = g.kind === 'tag' ? ICON.tag : (g.local ? ICON.laptop : '') + (g.remotes.length ? ICON.cloud : '');
@@ -408,16 +415,16 @@ function pill(g, col, k){
 
 /* opts.remotes: real remote names from `git remote` (desktop); otherwise guessed.
    opts.keep: preserve selection and scroll position (used by auto-refresh). */
-function guessRemotes(raws){
+function guessRemotes(raws: RawCommit[]){
   const remotes = new Set(['origin','upstream']);
-  raws.forEach(c => c.dec.split(',').forEach(r => { const m = r.trim().match(/^([^\s/]+)\/HEAD$/); if (m) remotes.add(m[1]); }));
+  raws.forEach(c => c.dec.split(',').forEach(r => { const m = r.trim().match(/^([^\s/]+)\/HEAD$/); if (m) remotes.add(m[1]!); }));
   return remotes;
 }
 
 /* Browser mode has no ref listing; rebuild one from the %D labels so both
    modes label, list and hide branches the same way. */
-function refsFromDec(raws, remotes){
-  const refs = []; let headRef = null, headSha = null;
+function refsFromDec(raws: RawCommit[], remotes: Set<string>): Refs{
+  const refs: [string, string][] = []; let headRef: string | null = null, headSha: string | null = null;
   raws.forEach(c => c.dec.split(',').map(s => s.trim()).filter(Boolean).forEach(d => {
     if (d === 'HEAD') { headSha = c.hash; return; }
     if (d.startsWith('HEAD -> ')) { d = d.slice(8); headRef = 'refs/heads/' + d; headSha = c.hash; }
@@ -428,7 +435,11 @@ function refsFromDec(raws, remotes){
   return { refs, headRef, headSha };
 }
 
-function setData(raws, repo, sample, opts = {}){
+interface DataOpts {
+  remotes?: string[]; refs?: Refs; hidden?: string[]; solo?: string[]; keep?: boolean;
+  ordered?: boolean; note?: string; more?: boolean; capped?: boolean;
+}
+function setData(raws: Commit[], repo: string, sample: boolean, opts: DataOpts = {}){
   const remotes = opts.remotes ? new Set(opts.remotes) : guessRemotes(raws);
   // Labels and sync tips come from the refs left after hiding; the panel
   // lists them all (S.refs).
@@ -437,7 +448,7 @@ function setData(raws, repo, sample, opts = {}){
   // `git log --date-order` already lists children before parents; only
   // pasted logs (browser mode) need sorting.
   const commits = opts.ordered ? raws : topoOrder(raws);
-  const keepHash = opts.keep && S.commits[sel] ? S.commits[sel].hash : null;
+  const keepHash = opts.keep ? S.commits[sel]?.hash ?? null : null;
   const anchor = scrollAnchor(), left = wrap.scrollLeft, top = wrap.scrollTop;
   const track = opts.keep ? S.track : null;   // upstream counts until branch_tracking answers again
   S = { commits: [], idx: new Map(), edges: [], maxLane: 0, lay: newLayout(), remotes,
@@ -455,43 +466,45 @@ function setData(raws, repo, sample, opts = {}){
    stays at the top, so new commits show up there. */
 function scrollAnchor(){
   const top = wrap.scrollTop - rowOff, i = Math.min(Math.floor(top / ROW_H), S.commits.length - 1);
-  return top > 0 && i >= 0 ? { hash: S.commits[i].hash, off: top - i * ROW_H } : null;
+  return top > 0 && i >= 0 ? { hash: S.commits[i]!.hash, off: top - i * ROW_H } : null;
 }
-function anchoredTop(anchor, fallback){
+function anchoredTop(anchor: { hash: string; off: number } | null, fallback: number){
   if (!anchor) return 0;
   const i = S.idx.get(anchor.hash);
   return i === undefined ? fallback : rowOff + i * ROW_H + anchor.off;
 }
 
-function prepCommit(c){
+function prepCommit(c: Commit){
   // c.dec stays as git printed it: browser mode rebuilds refs from it when
-  // branches are hidden or shown.
-  c.groups = groupRefs(S.refDec ? S.refDec.get(c.hash) || '' : c.dec, S.remotes);
+  // branches are hidden or shown. S.remotes is set by setData before any commit.
+  c.groups = groupRefs(S.refDec ? S.refDec.get(c.hash) || '' : c.dec, S.remotes!);
   c.ini = initials(c.author);
   c.hay = `${c.subject} ${c.author} ${c.email} ${c.hash} ${c.groups.map(g => g.name).join(' ')}`.toLowerCase();
 }
 
 /* Adds rows below the ones already loaded; earlier rows keep their layout. */
-function appendCommits(list){
+function appendCommits(list: Commit[]){
   const start = S.commits.length;
   list.forEach(c => { if (!S.idx.has(c.hash)) { S.idx.set(c.hash, S.commits.length); S.commits.push(c); } });
-  for (let i = start; i < S.commits.length; i++) prepCommit(S.commits[i]);
-  layoutRows(S.lay, S.commits, start, S.idx, S.edges);
-  S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax || 0);
+  for (let i = start; i < S.commits.length; i++) prepCommit(S.commits[i]!);
+  layoutRows(S.lay!, S.commits, start, S.idx, S.edges);
+  S.maxLane = Math.max(S.lay!.maxLane, S.stashLaneMax || 0);
 }
 
 /* Applies a planSync result in place: new rows are merged in, labels are
-   refreshed, and the view stays on the same commit. */
-function applySync(plan){
-  const sameDec = !plan.added.length && plan.dec.size === S.refDec.size
-    && [...plan.dec].every(([sha, d]) => S.refDec.get(sha) === d);
+   refreshed, and the view stays on the same commit. Sync runs only on a
+   loaded desktop repo, so S.refDec is set. */
+type SyncPlan = Exclude<ReturnType<typeof planSync>, { full: string }> & { allRefs?: Refs };
+function applySync(plan: SyncPlan){
+  const sameDec = !plan.added.length && plan.dec.size === S.refDec!.size
+    && [...plan.dec].every(([sha, d]) => S.refDec!.get(sha) === d);
   S.tips = plan.tips; S.refs = plan.allRefs || plan.refs;
   if (sameDec) return false;   // e.g. only stash or notes refs moved
 
-  const keepHash = S.commits[sel] ? S.commits[sel].hash : null;
+  const keepHash = S.commits[sel]?.hash ?? null;
   const anchor = scrollAnchor(), top = wrap.scrollTop;
 
-  const oldDec = S.refDec;
+  const oldDec = S.refDec!;
   S.refDec = plan.dec;
   S.commits.forEach(c => { if ((oldDec.get(c.hash) || '') !== (plan.dec.get(c.hash) || '')) prepCommit(c); });
   if (plan.added.length) {
@@ -501,23 +514,23 @@ function applySync(plan){
     S.edges = []; S.lay = newLayout();
     layoutRows(S.lay, S.commits, 0, S.idx, S.edges);   // rows on top shift the lanes below
     laneStashes();
-    S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax);
+    S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax!);   // set by laneStashes
   }
   render(keepHash, { top: anchoredTop(anchor, top), left: wrap.scrollLeft });
   return true;
 }
 
-function makeRow(i){
-  const c = S.commits[i], col = c.stashRow ? theme.muted : laneCol(c.color);
+function makeRow(i: number){
+  const c = S.commits[i]!, col = c.stashRow ? theme!.muted : laneCol(c.color);
   let refs = '';
   if (c.groups.length) {
-    refs = pill(c.groups[0], col, 0);
+    refs = pill(c.groups[0]!, col, 0);
     if (c.groups.length > 1) refs += `<span class="more" title="${esc(c.groups.slice(1).map(g => g.name).join(', '))}">+${c.groups.length - 1}</span>`;
     refs += `<span class="conn" style="background:${col}"></span>`;
   }
   const el = document.createElement('div');
   el.className = 'row' + (c.stashRow ? ' stash-row' : '') + (i === sel ? ' sel' : '') + (matchSet && !matchSet.has(i) ? ' dim' : '');
-  el.dataset.i = i;
+  el.dataset.i = String(i);
   el.style.top = rowOff + i * ROW_H + 'px';
   if (c.groups.length) el.style.setProperty('--tint', col + '12');
   el.innerHTML = `<div class="col-ref">${refs}</div><div class="col-graph"></div>`
@@ -533,39 +546,39 @@ function makeRow(i){
 const refPop = document.createElement('div');
 refPop.className = 'ref-pop'; refPop.hidden = true;
 let refPopI = -1, refPopTimer = 0;   // the row it is for (or about to open for)
-function openRefPop(i){
+function openRefPop(i: number){
   const c = S.commits[i]; if (!c) return;
-  const col = c.stashRow ? theme.muted : laneCol(c.color);
+  const col = c.stashRow ? theme!.muted : laneCol(c.color);
   // Each label sits on its own opaque backing; the box around them is see-through.
   refPop.innerHTML = c.groups.map((g, k) => `<span class="ref-item">${pill(g, col, k)}</span>`).join('');
-  refPop.dataset.i = i;
+  refPop.dataset.i = String(i);
   refPop.style.top = rowOff + i * ROW_H + 'px';
   if (!refPop.isConnected) body.append(refPop);
   refPop.hidden = false;
 }
 function closeRefPop(){ clearTimeout(refPopTimer); refPopTimer = 0; refPopI = -1; refPop.hidden = true; }
-const refCellRow = el => { const cell = el && el.closest && el.closest('.row .col-ref'), row = cell && cell.parentElement; return row && row !== wipRow ? +row.dataset.i : -1; };
+const refCellRow = (el: EventTarget | null) => { const cell = el instanceof Element ? el.closest('.row .col-ref') : null, row = cell && cell.parentElement; return row && row !== wipRow ? +row.dataset.i! : -1; };
 body.addEventListener('mouseover', e => {
-  if (refPop.contains(e.target)) return;
+  if (e.target instanceof Node && refPop.contains(e.target)) return;
   const i = refCellRow(e.target);
   if (i === refPopI) return;
   closeRefPop();
-  if (i >= 0 && S.commits[i].groups.length > 1) { refPopI = i; refPopTimer = setTimeout(() => openRefPop(i), 120); }
+  if (i >= 0 && S.commits[i]!.groups.length > 1) { refPopI = i; refPopTimer = setTimeout(() => openRefPop(i), 120); }
 });
 body.addEventListener('mouseout', e => {
   // Moving between the cell and its box (or within the box) keeps it.
   const to = e.relatedTarget;
-  if (refPopI < 0 || (to && refPop.contains(to)) || refCellRow(to) === refPopI) return;
+  if (refPopI < 0 || (to instanceof Node && refPop.contains(to)) || refCellRow(to) === refPopI) return;
   closeRefPop();
 });
 
 /* Index edges by row tile so a frame only looks at edges near the viewport. */
 function buildTiles(){
   const n = S.commits.length;
-  tiles = Array.from({ length: Math.ceil(n / TILE) }, () => []);
+  tiles = Array.from({ length: Math.ceil(n / TILE) }, (): Edge[] => []);
   S.edges.forEach(e => {
     const end = e.to >= 0 ? e.to : n - 1;
-    for (let t = Math.floor(e.from / TILE), last = Math.floor(end / TILE); t <= last; t++) tiles[t].push(e);
+    for (let t = Math.floor(e.from / TILE), last = Math.floor(end / TILE); t <= last; t++) tiles[t]!.push(e);
   });
 }
 
@@ -585,7 +598,7 @@ function draw(){
   if (S.more && b >= n - PREFETCH) loadMore();
 }
 
-function syncRows(a, b){
+function syncRows(a: number, b: number){
   for (const [i, el] of pool) if (i < a || i >= b) { el.remove(); pool.delete(i); }
   const frag = document.createDocumentFragment();
   for (let i = a; i < b; i++) if (!pool.has(i)) { const el = makeRow(i); pool.set(i, el); frag.appendChild(el); }
@@ -593,7 +606,7 @@ function syncRows(a, b){
 }
 
 /* The canvas covers only the visible part of the graph column, rows [a, b). */
-function paintGraph(a, b){
+function paintGraph(a: number, b: number){
   const n = S.commits.length;
   // Lanes past a narrowed graph column are simply cut off.
   const gx0 = Math.floor(Math.max(0, wrap.scrollLeft - cols.ref));
@@ -608,20 +621,21 @@ function paintGraph(a, b){
   if (canvas.height !== ph) canvas.height = ph;
   canvas.style.cssText = `left:${cols.ref + gx0}px;top:${rowOff + r0 * ROW_H}px;width:${w}px;height:${h}px`;
 
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
+  const th = theme!;
   ctx.setTransform(dpr, 0, 0, dpr, -gx0 * dpr, 0);
   ctx.clearRect(gx0, 0, w, h);
-  const oy = r0 * ROW_H, Y = v => Math.max(-64, Math.min(h + 64, v - oy));
+  const oy = r0 * ROW_H, Y = (v: number) => Math.max(-64, Math.min(h + 64, v - oy));
 
   ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   stamp++;
   const t1 = Math.floor(Math.min(n - 1, b) / TILE);
   for (let t = Math.floor(Math.max(0, a - 1) / TILE); t <= t1; t++) {
-    for (const e of tiles[t]) {
+    for (const e of tiles[t]!) {
       if (e.stamp === stamp) continue;
       e.stamp = stamp;
       if (e.from > b || (e.to >= 0 ? e.to : n) < a - 1) continue;
-      if (e.color < 0) { ctx.setLineDash([3, 3]); ctx.strokeStyle = theme.muted; } else ctx.strokeStyle = laneCol(e.color);
+      if (e.color < 0) { ctx.setLineDash([3, 3]); ctx.strokeStyle = th.muted; } else ctx.strokeStyle = laneCol(e.color);
       ctx.beginPath(); traceEdge(ctx, e, n, Y); ctx.stroke();
       if (e.color < 0) ctx.setLineDash([]);
     }
@@ -629,7 +643,7 @@ function paintGraph(a, b){
 
   ctx.lineCap = 'butt'; ctx.globalAlpha = 0.6;
   for (let i = a; i < b; i++) {
-    const c = S.commits[i]; if (!c.groups.length) continue;
+    const c = S.commits[i]!; if (!c.groups.length) continue;
     ctx.strokeStyle = laneCol(c.color);
     ctx.beginPath(); ctx.moveTo(0, Y(ry(i))); ctx.lineTo(lx(c.lane) - nodeR(c), Y(ry(i))); ctx.stroke();
   }
@@ -640,44 +654,44 @@ function paintGraph(a, b){
   // all: one in some lane would look like it belonged to that branch.
   const hc = on ? wipHead() : -1;
   if (hc >= 0) {
-    const x = lx(S.commits[hc].lane);
+    const head = S.commits[hc]!, x = lx(head.lane);
     ctx.save();
     ctx.setLineDash([3, 3]); ctx.lineWidth = 2; ctx.lineCap = 'butt';
-    ctx.strokeStyle = laneCol(S.commits[hc].color);
-    if (a <= hc) { ctx.beginPath(); ctx.moveTo(x, Y(ry(-1) + R)); ctx.lineTo(x, Y(ry(hc) - nodeR(S.commits[hc]))); ctx.stroke(); }
+    ctx.strokeStyle = laneCol(head.color);
+    if (a <= hc) { ctx.beginPath(); ctx.moveTo(x, Y(ry(-1) + R)); ctx.lineTo(x, Y(ry(hc) - nodeR(head))); ctx.stroke(); }
     if (r0 < 0) {
       ctx.beginPath(); ctx.arc(x, Y(ry(-1)), R - 1, 0, Math.PI * 2);
-      ctx.fillStyle = theme.stroke; ctx.fill(); ctx.stroke();
-      if (wipSel) { ctx.setLineDash([]); ctx.strokeStyle = theme.ring; ctx.beginPath(); ctx.arc(x, Y(ry(-1)), R + 3.5, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.fillStyle = th.stroke; ctx.fill(); ctx.stroke();
+      if (wipSel) { ctx.setLineDash([]); ctx.strokeStyle = th.ring; ctx.beginPath(); ctx.arc(x, Y(ry(-1)), R + 3.5, 0, Math.PI * 2); ctx.stroke(); }
     }
     ctx.restore();
   }
 
-  ctx.lineWidth = 2.5; ctx.strokeStyle = theme.stroke;
+  ctx.lineWidth = 2.5; ctx.strokeStyle = th.stroke;
   ctx.font = NODE_FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (let i = a; i < b; i++) {
-    const c = S.commits[i], x = lx(c.lane), y = Y(ry(i)), k = c.color % PALETTE.length;
+    const c = S.commits[i]!, x = lx(c.lane), y = Y(ry(i)), k = c.color % PALETTE.length;
     if (c.stashRow) {   // a gray box, like GitKraken's stash nodes
       ctx.beginPath(); ctx.roundRect(x - R + 1.5, y - R + 1.5, 2 * R - 3, 2 * R - 3, 4);
-      ctx.fillStyle = theme.muted; ctx.fill(); ctx.stroke();
-      ctx.fillStyle = theme.stroke; ctx.fillRect(x - 4, y - 1, 8, 2);
+      ctx.fillStyle = th.muted; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = th.stroke; ctx.fillRect(x - 4, y - 1, 8, 2);
       continue;
     }
     ctx.beginPath(); ctx.arc(x, y, nodeR(c), 0, Math.PI * 2);
-    ctx.fillStyle = PALETTE[k]; ctx.fill(); ctx.stroke();
-    if (c.parents.length <= 1) { ctx.fillStyle = ON_COL[k]; ctx.fillText(c.ini, x, y + 0.5); }
+    ctx.fillStyle = PALETTE[k]!; ctx.fill(); ctx.stroke();
+    if (c.parents.length <= 1) { ctx.fillStyle = ON_COL[k]!; ctx.fillText(c.ini, x, y + 0.5); }
   }
 
   if (sel >= a && sel < b) {
-    const c = S.commits[sel];
-    ctx.lineWidth = 2; ctx.strokeStyle = theme.ring;
+    const c = S.commits[sel]!;
+    ctx.lineWidth = 2; ctx.strokeStyle = th.ring;
     ctx.beginPath(); ctx.arc(lx(c.lane), Y(ry(sel)), nodeR(c) + 3.5, 0, Math.PI * 2); ctx.stroke();
   }
 
   // A graph column narrower than the lanes fades out at its edge instead of
   // ending in a hard cut, so it reads as "more to the right".
   const colW = graphColW();
-  if (colW < S.graphW && gx1 > colW - 18) {
+  if (colW < S.graphW! && gx1 > colW - 18) {   // graphW is set by updateView
     const fade = ctx.createLinearGradient(colW - 18, 0, colW, 0);
     fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,1)');
     ctx.globalCompositeOperation = 'destination-out';
@@ -696,8 +710,8 @@ function updateView(){
   placeRows();
   buildTiles();
 
-  let headG = null;
-  const branches = new Set(), tags = new Set();
+  let headG = null as RefGroup | null;   // assigned inside the callback below
+  const branches = new Set<string>(), tags = new Set<string>();
   S.commits.forEach(c => c.groups.forEach(g => {
     (g.kind === 'tag' ? tags : branches).add(g.name);
     if (g.head && !headG) headG = g;
@@ -713,7 +727,7 @@ function updateView(){
   document.title = `${S.repo || 'Repository'} — GitKrapao`;
 }
 
-function render(keepHash, keepScroll){
+function render(keepHash: string | null, keepScroll: { top: number; left: number } | null){
   const n = S.commits.length;
   closeRefPop();
   for (const el of pool.values()) el.remove();
@@ -732,7 +746,7 @@ function render(keepHash, keepScroll){
     detailFor = null;
     detail.innerHTML = '<div class="empty">This repository has no commits yet</div>';
   } else if (keepHash && S.idx.has(keepHash)) {
-    select(S.idx.get(keepHash), { detail: show });
+    select(S.idx.get(keepHash)!, { detail: show });
   } else {
     const headIdx = S.commits.findIndex(c => c.groups.some(g => g.head));
     select(headIdx >= 0 ? headIdx : 0, { scroll: !keepScroll, detail: show });
@@ -744,14 +758,14 @@ function render(keepHash, keepScroll){
 /* ---------- selection & detail ---------- */
 /* detail: false keeps a stash or pull request card in the detail panel
    while the graph shows the commit it belongs to. */
-function select(i, { scroll = false, open = false, detail: show = true } = {}){
+function select(i: number, { scroll = false, open = false, detail: show = true }: { scroll?: boolean; open?: boolean; detail?: boolean } = {}){
   if (!(i >= 0 && i < S.commits.length)) return;
-  if (pool.has(sel)) pool.get(sel).classList.remove('sel');
+  pool.get(sel)?.classList.remove('sel');
   if (wipSel) { wipSel = false; wipRow.classList.remove('sel'); }
   sel = i;
-  if (pool.has(i)) pool.get(i).classList.add('sel');
+  pool.get(i)?.classList.add('sel');
   if (show) {
-    const c = S.commits[i], st = c.stashRow && stashes.find(x => x.key === c.stashKey);
+    const c = S.commits[i]!, st = c.stashRow && stashes.find(x => x.key === c.stashKey);
     if (st) stashCard(st); else renderDetail(c);
   }
   markSide();
@@ -759,16 +773,16 @@ function select(i, { scroll = false, open = false, detail: show = true } = {}){
   if (open) detail.classList.add('open');
   scheduleDraw();
 }
-function ensureVisible(i){
+function ensureVisible(i: number){
   const top = HEAD_H + rowOff + i * ROW_H;
   if (top < wrap.scrollTop + HEAD_H) wrap.scrollTop = top - HEAD_H;
   else if (top + ROW_H > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = top + ROW_H - wrap.clientHeight;
 }
-function hashLink(h){
+function hashLink(h: string){
   return S.idx.has(h) ? `<button class="hash-link" data-jump="${esc(h)}">${esc(h.slice(0,7))}</button>` : `<code class="muted" title="Not in the loaded history">${esc(h.slice(0,7))}</code>`;
 }
-let detailFor = null;        // what the detail panel shows: a commit, stash or pull request
-function renderDetail(c){
+let detailFor: Shown | null = null;        // what the detail panel shows: a commit, stash or pull request
+function renderDetail(c: Commit){
   const col = laneCol(c.color);
   detailFor = c;
   detail.innerHTML =
@@ -780,7 +794,7 @@ function renderDetail(c){
     + `<dl class="d-meta"><dt>Date</dt><dd>${esc(absDate(c.time))} <span class="muted">(${esc(rel(c.time))})</span></dd>`
     + `<dt>SHA</dt><dd><code>${esc(c.hash)}</code></dd>`
     + `<dt>Parents</dt><dd>${c.parents.length ? c.parents.map(hashLink).join('') : '<span class="muted">None, this is a root commit</span>'}</dd>`
-    + `<dt>Children</dt><dd>${c.children.length ? c.children.map(i => hashLink(S.commits[i].hash)).join('') : '<span class="muted">None in loaded history</span>'}</dd></dl>`
+    + `<dt>Children</dt><dd>${c.children.length ? c.children.map(i => hashLink(S.commits[i]!.hash)).join('') : '<span class="muted">None in loaded history</span>'}</dd></dl>`
     + (c.parents.length > 1 ? '<p class="muted note">Merge commit, shown as a small dot on the graph.</p>' : '')
     + (NATIVE && current ? '<div id="dFiles" class="d-files"><p class="muted">Loading changes…</p></div>' : '');
   requestDetail(c);
@@ -1497,9 +1511,10 @@ wipRow.className = 'row wip-row';
 wipRow.hidden = true;
 
 const wipOn = () => NATIVE && !!current && wip.path === current.path && wip.total > 0 && S.commits.length > 0;
-function wipHead(){
+function wipHead(): number{
   const h = S.refs && S.refs.headSha && S.idx.get(S.refs.headSha);
-  return h === undefined || h === null || h === false ? -1 : h;
+  // headSha is null or a full SHA (never ''), so h is a row index here.
+  return h === undefined || h === null || h === false ? -1 : h as number;
 }
 
 async function loadWip({ force = false } = {}){
@@ -1610,7 +1625,8 @@ function wipCard(){
    Kept per repository outside S, which is rebuilt on every reload. Clicking
    one puts its card in the detail panel and moves the graph to the commit
    it belongs to, without replacing the card. */
-let stashes = [], stashPath = null, stashSeq = 0;
+type StashItem = Stash & { card: 'stash'; key: string };
+let stashes: StashItem[] = [], stashPath: string | null = null, stashSeq = 0;
 async function loadStashes(){
   if (!NATIVE || !current) return;
   const seq = ++stashSeq, path = current.path;
@@ -2039,7 +2055,7 @@ function hideError(){ $('#banner').hidden = true; }
 $('#bannerClose').addEventListener('click', hideError);
 
 /* ---------- desktop: real repositories ---------- */
-let current = null;          // { path, name }
+let current: RepoInfo | null = null;
 let fingerprintSeen = null;
 let busy = false, moreBusy = false;
 let streamGen = 0;           // backend history stream the loaded rows came from

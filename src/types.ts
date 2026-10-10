@@ -18,16 +18,29 @@ export interface Commit extends RawCommit {
   groups: RefGroup[]; ini: string; hay: string;
   row: number; lane: number; color: number; children: number[];
   stashRow?: boolean; stashKey?: string; stashName?: string;
+  /** Never set on a commit; lets `detailFor.card` / `.key` tell commits and cards apart. */
+  card?: undefined; key?: undefined;
 }
 
+/** What the detail panel shows besides a commit. */
+export type Card =
+  | { card: 'wip'; key: string }
+  | { card: 'pr'; key: string }
+  | { card: 'stash'; stash: true; key: string; hash: string; parents: string[] };
+export type Shown = Commit | Card;
+
 /** A parent link. to = -1 while the parent is not loaded yet; color -1 = stash line. */
-export interface Edge { from: number; fromLane: number; lane: number; to: number; toLane: number; color: number }
+export interface Edge { from: number; fromLane: number; lane: number; to: number; toLane: number; color: number;
+  /** paintGraph's frame counter, so an edge in several tiles is drawn once. */
+  stamp?: number }
 
 export interface Layout { lanes: (string | null)[]; laneColor: number[]; seq: number; maxLane: number; open: Map<string, Edge[]> }
 
 export interface AppState {
   commits: Commit[]; idx: Map<string, number>; edges: Edge[]; maxLane: number; repo: string; sample: boolean; note: string;
-  lay?: Layout; remotes?: Set<string>; refs?: Refs; refDec?: Map<string, string>; tips?: Set<string>; more?: boolean;
-  bad?: number[]; capped?: boolean; forceFull?: boolean; graphW?: number; stashLaneMax?: number; stashRows?: number;
-  track?: Map<string, Track>;
+  // Set by setData once a history is loaded (absent only before the first load).
+  lay?: Layout; remotes?: Set<string>; refs?: Refs | null; refDec?: Map<string, string> | null; tips?: Set<string>; more?: boolean;
+  /** Number of unreadable log entries that were skipped. */
+  bad?: number; capped?: boolean; forceFull?: boolean; graphW?: number; stashLaneMax?: number; stashRows?: number;
+  track?: Map<string, Track> | null;
 }
