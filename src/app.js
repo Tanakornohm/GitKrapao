@@ -1807,10 +1807,10 @@ function sideActivate(el){
   else if (kind === 'pr') showPr(el.dataset.key);
   else sideToggle(el);
 }
-function sideMoveTo(el){
+function sideMoveTo(el, focus = true){
   if (!el) return;
   sideList.querySelectorAll('[role="treeitem"][tabindex="0"]').forEach(x => { x.tabIndex = -1; });
-  el.tabIndex = 0; sideFocus = el.dataset.key; el.focus();
+  el.tabIndex = 0; sideFocus = el.dataset.key; if (focus) el.focus();
 }
 const sideVisible = () => [...sideList.querySelectorAll('[role="treeitem"]')]
   .filter(el => !el.parentElement.closest('[aria-expanded="false"]'));
@@ -1850,6 +1850,79 @@ $('#bq').addEventListener('keydown', e => {
   if (e.key === 'Escape' && e.target.value) { e.target.value = ''; renderSide(); e.stopPropagation(); }
   if (e.key === 'ArrowDown') { e.preventDefault(); sideMoveTo(sideVisible()[0]); }
 });
+
+/* branch menu: right-click a branch, folder or remote in the panel, or a
+   branch label in the graph. Hide follows the eye button's rules. */
+const ctxMenu = $('#ctxMenu');
+let ctxRun = [], ctxBack = null, ctxKeys = false;   // item actions; what gets focus back; keyboard in use
+function openCtx(e, entries, back){
+  e.preventDefault();
+  // From the Menu key / Shift+F10: pointerType '' (or no position at all).
+  ctxKeys = e.pointerType === '' || (!e.pointerType && !e.clientX && !e.clientY);
+  ctxRun = entries.map(x => x.run); ctxBack = back;
+  ctxMenu.innerHTML = entries.map((x, k) => `<button class="menu-item" role="menuitem" data-k="${k}"${x.off ? ' disabled' : ''}>`
+    + `<span class="n">${esc(x.label)}</span>${x.off ? `<span class="p">${esc(x.off)}</span>` : ''}</button>`).join('');
+  ctxMenu.hidden = false;
+  // At the pointer; from the keyboard, under the item.
+  let x = e.clientX, y = e.clientY;
+  if (ctxKeys && back) { const r = back.getBoundingClientRect(); x = r.left + 16; y = r.bottom; }
+  const m = ctxMenu.getBoundingClientRect();
+  ctxMenu.style.left = Math.max(4, Math.min(x, innerWidth - m.width - 4)) + 'px';
+  ctxMenu.style.top = Math.max(4, Math.min(y, innerHeight - m.height - 4)) + 'px';
+  // A mouse user gets no focus ring: the menu itself (no outline) holds focus
+  // for the arrow keys, and items light up on hover.
+  ((ctxKeys && ctxMenu.querySelector('.menu-item:not(:disabled)')) || ctxMenu).focus();
+}
+function closeCtx(refocus){
+  if (ctxMenu.hidden) return;
+  ctxMenu.hidden = true; ctxRun = [];
+  if (refocus && ctxKeys && ctxBack && ctxBack.isConnected) ctxBack.focus();
+  else if (ctxMenu.contains(document.activeElement)) document.activeElement.blur();
+  ctxBack = null;
+}
+const SOLO_OFF = 'Exit solo to hide branches', HEAD_OFF = 'The checked-out branch is always shown';
+
+sideList.addEventListener('contextmenu', e => {
+  const el = e.target.closest('[role="treeitem"]');
+  const leaf = el && el.dataset.kind === 'branch';
+  if (!el || !el.dataset.ref || !(leaf || el.classList.contains('sb-node'))) return;
+  sideMoveTo(el, false);
+  const ref = el.dataset.ref, solo = soloList().length > 0;
+  const show = !solo && el.classList.contains('is-hidden');
+  const entries = [{ label: show ? 'Show' : 'Hide', off: solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : '', run: () => toggleHidden(ref) }];
+  if (leaf) entries.push({ label: 'Copy branch name', run: () => copyText(refLabel(ref)) });
+  openCtx(e, entries, el);
+});
+body.addEventListener('contextmenu', e => {
+  const pill = e.target.closest('.pill'), row = pill && pill.closest('.row');
+  if (!row || row === wipRow) return;
+  // A label is the first ref group of its commit: one name, local and/or on remotes.
+  const c = S.commits[+row.dataset.i], g = c && c.groups[0];
+  if (!g || g.kind !== 'branch' || g.name === 'HEAD (detached)') return;
+  const refs = (g.local ? ['refs/heads/' + g.name] : []).concat(g.remotes.map(r => `refs/remotes/${r}/${g.name}`));
+  const solo = soloList().length > 0;
+  openCtx(e, [
+    { label: 'Hide', off: solo ? SOLO_OFF : g.head ? HEAD_OFF : '', run: () => { saveHidden(refs.reduce(toggleIn, hiddenList())); reloadForWalk(); } },
+    { label: 'Copy branch name', run: () => copyText(g.local ? g.name : `${g.remotes[0]}/${g.name}`) },
+  ], null);
+});
+ctxMenu.addEventListener('click', e => {
+  const b = e.target.closest('.menu-item'); if (!b || b.disabled) return;
+  const run = ctxRun[+b.dataset.k];
+  closeCtx(true); run();
+});
+ctxMenu.addEventListener('keydown', e => {
+  e.stopPropagation();   // the graph and panel keys stay off while the menu is open
+  ctxKeys = true;        // from here on, focus rings and returning focus are wanted
+  const on = [...ctxMenu.querySelectorAll('.menu-item:not(:disabled)')], k = on.indexOf(document.activeElement);
+  const to = { ArrowDown: k + 1, ArrowUp: k < 0 ? -1 : k - 1, Home: 0, End: on.length - 1 }[e.key];
+  if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeCtx(true); }
+  else if (to !== undefined && on.length) { e.preventDefault(); on[(to + on.length) % on.length].focus(); }
+});
+document.addEventListener('pointerdown', e => { if (!ctxMenu.contains(e.target)) closeCtx(false); }, true);
+[wrap, sideList].forEach(el => el.addEventListener('scroll', () => closeCtx(false), { passive: true }));
+window.addEventListener('blur', () => closeCtx(false));
+window.addEventListener('resize', () => closeCtx(false));
 
 /* panel visibility and width */
 const SIDE = { min: 160, max: 520, def: 200 };
