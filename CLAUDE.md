@@ -16,6 +16,8 @@ A GitKraken-style Git GUI built with Tauri (Rust + plain JS), using pnpm.
 - Layout is append-only (`layoutRows`): rows already placed never move when a new page arrives; an edge whose parent is not loaded yet waits in `open`. Any layout change must give identical values whether the history is loaded at once or page by page. (Stash rows are the one exception; see below.)
 - Desktop mode uses the order from `git log --date-order` as is (narrower graph than `topoOrder`); `topoOrder` is only for logs pasted in browser mode.
 - Every row ↔ pixel conversion goes through `rowOff` (ROW_H while the WIP row shows, else 0): `makeRow`, the canvas top, the `draw()` range, `placeRows` (body height, `moreRow`), `ensureVisible`, `jumpTo` centering, and both sides of `scrollAnchor`/`anchoredTop`. When the WIP row appears or goes away, `placeRows` shifts scrollTop so the same commits stay on screen.
+- Lane colors come from the CSS token `--lanes` (one list per theme; the light theme uses darker shades so lines reach 3:1 on a white page). `readTheme` loads it into `PALETTE`/`ON_COL`; `applyTheme` rebuilds rows, panel and card when it changes. Text on a colored fill (node initials, checked-out label, avatars) always goes through `textOn`, which picks dark or white by WCAG contrast.
+- `ROW_H` in app.js must equal `--rowh` in app.css.
 - Canvas pixels are not bit-exact even when the same data is redrawn, so never compare layouts by pixels; compare rows (lane, color) and edges.
 
 ## WIP row (work_status)
