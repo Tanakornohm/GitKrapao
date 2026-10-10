@@ -5,7 +5,9 @@
   "version": "0.1.0",
   "identifier": "local.lanes.gitgraph",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../dist",
+    "beforeDevCommand": { "script": "pnpm run web:watch", "wait": false },
+    "beforeBuildCommand": "pnpm run web:build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -33,6 +35,11 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    }
   }
 }

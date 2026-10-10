@@ -25,6 +25,7 @@ const FLUSH_EVERY: usize = 512;
 const PAGE_WAIT: Duration = Duration::from_secs(60);
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct RepoInfo {
     path: String,
@@ -34,6 +35,7 @@ struct RepoInfo {
 /// Ref snapshot. Tips are commit ids; annotated tags are peeled one level and
 /// refs to anything other than a commit are left out.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct Refs {
     /// [commit, full ref name] for refs/heads, refs/remotes and refs/tags.
@@ -45,8 +47,10 @@ struct Refs {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct StreamInfo {
+    #[cfg_attr(test, ts(type = "number"))]
     gen: u64,
     remotes: Vec<String>,
     /// Taken before the log and the ref listing start.
@@ -55,6 +59,7 @@ struct StreamInfo {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct SyncInfo {
     /// Taken before and after reading; if they differ the repo moved while
@@ -69,6 +74,7 @@ struct SyncInfo {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct Page {
     log: String,
@@ -79,6 +85,7 @@ struct Page {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct FileChange {
     /// A, M, D, R, C, T, ... (rename/copy score dropped)
@@ -87,11 +94,14 @@ struct FileChange {
     /// Source path of a rename or copy.
     old_path: Option<String>,
     /// Lines added/removed; None for binary files.
+    #[cfg_attr(test, ts(type = "number | null"))]
     add: Option<u64>,
+    #[cfg_attr(test, ts(type = "number | null"))]
     del: Option<u64>,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct CommitDetail {
     /// Full raw message (%B), subject included.
@@ -99,12 +109,15 @@ struct CommitDetail {
     files: Vec<FileChange>,
     /// Number of changed files; can exceed `files.len()` (see MAX_FILES).
     total_files: usize,
+    #[cfg_attr(test, ts(type = "number"))]
     add: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     del: u64,
 }
 
 /// A local branch and how it compares with its upstream.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct Track {
     /// Short name, e.g. feature/login.
@@ -687,6 +700,7 @@ async fn commit_detail(path: String, sha: String) -> Result<CommitDetail, String
 /* ---------- work in progress (uncommitted changes) ---------- */
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct WorkFile {
     path: String,
@@ -701,6 +715,7 @@ struct WorkFile {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct WorkStatus {
     files: Vec<WorkFile>,
@@ -783,6 +798,7 @@ async fn work_status(path: String) -> Result<WorkStatus, String> {
 /* ---------- file diffs ---------- */
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct FileDiff {
     /// Unified diff text (git's own, or built here for an untracked file).
@@ -916,6 +932,7 @@ async fn file_diff(path: String, kind: String, sha: Option<String>, file: String
 /* ---------- stashes ---------- */
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct Stash {
     sha: String,
@@ -924,6 +941,7 @@ struct Stash {
     parents: Vec<String>,
     /// stash@{n}
     name: String,
+    #[cfg_attr(test, ts(type = "number"))]
     time: i64,
     /// Reflog subject: "WIP on main: 1a2b3c4 subject" or "On main: message".
     message: String,
@@ -969,7 +987,7 @@ async fn list_stashes(path: String) -> Result<Vec<Stash>, String> {
 }
 
 /* ---------- pull requests (Azure DevOps, through the az CLI) ----------
-   Uses the account the user signed in with `az login`; Lanes never sees or
+   Uses the account the user signed in with `az login`; GitKrapao never sees or
    stores a token. */
 
 #[derive(Debug, PartialEq)]
@@ -1058,16 +1076,20 @@ fn parse_azure_remote(url: &str) -> Option<AzureRepo> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct Reviewer {
     name: String,
     /// 10 approved, 5 approved with suggestions, 0 no vote, -5 waiting for author, -10 rejected
+    #[cfg_attr(test, ts(type = "number"))]
     vote: i64,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct PullRequest {
+    #[cfg_attr(test, ts(type = "number"))]
     id: u64,
     title: String,
     description: String,
@@ -1086,6 +1108,7 @@ struct PullRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
 struct PrList {
     /// "org/project/repo" of the Azure DevOps remote; None when the repo has none.
@@ -1404,7 +1427,7 @@ mod tests {
     // paths and inputs.
     #[test]
     fn file_diffs_against_real_git() {
-        let dir = std::env::temp_dir().join(format!("lanes-diff-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gitkrapao-diff-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let run = |args: &[&str]| {
@@ -1490,7 +1513,7 @@ mod tests {
     // every level, and a missing branch matches nothing instead of failing.
     #[test]
     fn solo_globs_against_real_git() {
-        let dir = std::env::temp_dir().join(format!("lanes-solo-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gitkrapao-solo-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let run = |args: &[&str]| {

@@ -1,4 +1,4 @@
-// Builds a fake but realistic Git repository for developing Lanes without
+// Builds a fake but realistic Git repository for developing GitKrapao without
 // touching real work repos: main/develop/feature/release/hotfix branches,
 // pull-request merges, annotated tags, remote-tracking refs, several authors,
 // Thai and English messages, and adds, edits, deletes, renames and a binary.
@@ -10,12 +10,13 @@ import { existsSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:
 import path from 'node:path';
 
 const out = path.resolve(process.argv[2] || path.join(import.meta.dirname, '..', '.mock', 'demo-repo'));
-const MARKER = path.join(out, '.git', 'lanes-mock');
-if (existsSync(out) && readdirSync(out).length && !existsSync(MARKER)) {
+const MARKER = path.join(out, '.git', 'gitkrapao-mock');
+// lanes-mock: the marker written before the rename to GitKrapao.
+if (existsSync(out) && readdirSync(out).length && !existsSync(MARKER) && !existsSync(path.join(out, '.git', 'lanes-mock'))) {
   console.error(`Refusing to delete ${out}: it exists and was not made by this script.`);
   process.exit(1);
 }
-// Retries: a git process (Lanes polling this repo, an editor) can hold the folder for a moment on Windows.
+// Retries: a git process (GitKrapao polling this repo, an editor) can hold the folder for a moment on Windows.
 rmSync(out, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 mkdirSync(out, { recursive: true });
 const git = (args, input) => execFileSync('git', ['-C', out, ...args], { input, stdio: ['pipe', 'pipe', 'inherit'] }).toString();
@@ -92,7 +93,7 @@ const ts = name => `export function ${name.replace(/\W/g, '_')}() {\n  return '$
 /* ---------- history ---------- */
 const lead = PEOPLE[1];
 commitTo('main', 'Initial commit', [
-  { op: 'M', path: 'README.md', content: '# Acme Webapp\n\nตัวอย่างโปรเจกต์สำหรับทดสอบ Lanes\n' },
+  { op: 'M', path: 'README.md', content: '# Acme Webapp\n\nตัวอย่างโปรเจกต์สำหรับทดสอบ GitKrapao\n' },
   { op: 'M', path: 'package.json', content: '{\n  "name": "acme-webapp",\n  "version": "0.1.0"\n}\n' },
   { op: 'M', path: '.gitignore', content: 'node_modules/\ndist/\n' },
   { op: 'M', path: 'src/index.ts', content: ts('main') },

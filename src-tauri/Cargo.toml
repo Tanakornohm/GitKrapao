@@ -1,12 +1,12 @@
 [package]
-name = "lanes"
+name = "gitkrapao"
 version = "0.1.0"
 description = "A personal Git graph viewer"
 edition = "2021"
 rust-version = "1.90"
 
 [lib]
-name = "lanes_lib"
+name = "gitkrapao_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -23,3 +23,6 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+[dev-dependencies]
+ts-rs = "12.0.1"
