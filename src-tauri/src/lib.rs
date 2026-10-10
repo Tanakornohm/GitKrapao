@@ -987,7 +987,7 @@ async fn list_stashes(path: String) -> Result<Vec<Stash>, String> {
 }
 
 /* ---------- pull requests (Azure DevOps, through the az CLI) ----------
-   Uses the account the user signed in with `az login`; Lanes never sees or
+   Uses the account the user signed in with `az login`; GitKrapao never sees or
    stores a token. */
 
 #[derive(Debug, PartialEq)]
@@ -1427,7 +1427,7 @@ mod tests {
     // paths and inputs.
     #[test]
     fn file_diffs_against_real_git() {
-        let dir = std::env::temp_dir().join(format!("lanes-diff-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gitkrapao-diff-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let run = |args: &[&str]| {
@@ -1513,7 +1513,7 @@ mod tests {
     // every level, and a missing branch matches nothing instead of failing.
     #[test]
     fn solo_globs_against_real_git() {
-        let dir = std::env::temp_dir().join(format!("lanes-solo-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gitkrapao-solo-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let run = |args: &[&str]| {

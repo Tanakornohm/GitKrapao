@@ -1,4 +1,4 @@
-// Headless Edge UI tests. Builds a test bundle (window.__lanes exposed) and a
+// Headless Edge UI tests. Builds a test bundle (window.__gitkrapao exposed) and a
 // production bundle, then for each suite writes a page (built index.html +
 // optional setup before app.js + helpers + probe after it), opens it in Edge
 // with a fresh profile, and reads the PASS/FAIL lines from <pre id="result">.
@@ -38,7 +38,7 @@ for (const file of readdirSync(here).filter(f => f.endsWith('.suite.mjs') && (!f
       .replace('<script src="app.js"></script>', () => `<script>${capture}</script>${typeof s.setup === 'function' ? s.setup(v) : s.setup || ''}<script src="app.js"></script><script>${helpers}</script><script>${s.probe}</script>`);
     const page = join(dir, `${name.replace(/\W+/g, '_')}.html`);
     writeFileSync(page, html);
-    const prof = mkdtempSync(join(tmpdir(), 'lanes-ui-'));
+    const prof = mkdtempSync(join(tmpdir(), 'gitkrapao-ui-'));
     const r = spawnSync(edge, ['--headless=new', '--disable-gpu', '--allow-file-access-from-files', `--user-data-dir=${prof}`,
       `--virtual-time-budget=${s.budget || 20000}`, '--window-size=1400,900', '--dump-dom', pathToFileURL(page).href],
       { encoding: 'utf8', maxBuffer: 64 << 20 });

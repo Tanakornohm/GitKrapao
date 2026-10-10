@@ -116,8 +116,7 @@ tests/ui/               headless Edge UI suites and the layout snapshot
 CLAUDE.md               design rules and decisions (read before changing code)
 ```
 
-Users see the name GitKrapao, but everything internal is still called `lanes`, for example:
-- the Cargo crate
+The project used to be called `lanes`. Two internal names keep that name on purpose:
 - the `lanes.*` localStorage keys
 - the `local.lanes.gitgraph` identifier
 

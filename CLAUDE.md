@@ -4,7 +4,7 @@ A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 
 ## Name
 - The app is called **GitKrapao** (a pun on GitKraken and กะเพรา): `productName`, `mainBinaryName`, the window title, the page title and user-facing messages.
-- The project folder is `D:\gitkrapao` (renamed from `D:\lanes`). Everything internal stays `lanes`: the Cargo crate (`lanes`, `lanes_lib`), package.json, code comments, localStorage keys (`lanes.*`) and the Tauri `identifier` (`local.lanes.gitgraph`). Never rename the keys or the identifier: the identifier picks the WebView data folder, so changing either loses every user's saved settings (hidden branches, solo, column widths, recent repos).
+- The project folder is `D:\gitkrapao` (renamed from `D:\lanes`). Internal names are `gitkrapao` too: the Cargo crate (`gitkrapao`, `gitkrapao_lib`), package.json, the test hook `window.__gitkrapao` and the mock marker `.git/gitkrapao-mock` (`pnpm run mock` still accepts the old `lanes-mock`). Only two things keep the old name `lanes`, on purpose: the localStorage keys (`lanes.*`) and the Tauri `identifier` (`local.lanes.gitgraph`). Never rename them: the identifier picks the WebView data folder, so changing either loses every user's saved settings (hidden branches, solo, column widths, recent repos). ("lanes" is also the graph's own word for its columns: `--lanes`, `laneStashes`, `Layout.lanes`.)
 
 ## Goal
 - The feature that must be best-in-class is the history graph of commits, branches and merges: as beautiful and easy to read as GitKraken's.
@@ -100,14 +100,14 @@ A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 - The JS side waits 100 ms before fetching (for fast arrow-key browsing) and caches 300 commits.
 
 ## Test data
-- Never test with the user's real work repos. Use `pnpm run mock`, which builds `.mock/demo-repo` with `git fast-import`, identical on every run: 158 commits, main/develop/feature/release/hotfix, tags, a remote with upstreams that are ahead, 2 stashes (one with untracked files), and Thai messages. The script only deletes and rebuilds a folder that has the marker `.git/lanes-mock`.
+- Never test with the user's real work repos. Use `pnpm run mock`, which builds `.mock/demo-repo` with `git fast-import`, identical on every run: 158 commits, main/develop/feature/release/hotfix, tags, a remote with upstreams that are ahead, 2 stashes (one with untracked files), and Thai messages. The script only deletes and rebuilds a folder that has the marker `.git/gitkrapao-mock` (or the older `.git/lanes-mock`).
 - Browser mode (`pnpm run web:build`, then open `dist/index.html`) uses built-in sample data and needs no git.
-- UI tests: `pnpm run test:ui` (headless Edge, a fresh profile per suite) runs `tests/ui/*.suite.mjs` against a test bundle; suites marked `prodSafe` (those that do not read `window.__lanes`) also run against the minified production bundle. `capture.js` is injected before the suite's setup and app.js, so an error or unhandled rejection while the page boots fails the suite. `layout.suite.mjs` compares every row (hash, lane, color) and edge of the sample and of `tests/ui/fixtures/mock-log.txt` with `fixtures/layout-baseline.json`; refresh the baseline (`-- --write-baseline`) only for an intended layout change.
+- UI tests: `pnpm run test:ui` (headless Edge, a fresh profile per suite) runs `tests/ui/*.suite.mjs` against a test bundle; suites marked `prodSafe` (those that do not read `window.__gitkrapao`) also run against the minified production bundle. `capture.js` is injected before the suite's setup and app.js, so an error or unhandled rejection while the page boots fails the suite. `layout.suite.mjs` compares every row (hash, lane, color) and edge of the sample and of `tests/ui/fixtures/mock-log.txt` with `fixtures/layout-baseline.json`; refresh the baseline (`-- --write-baseline`) only for an intended layout change.
 
 ## Commands
 - `pnpm run dev` runs `tauri dev` through `scripts/tauri.mjs` (the first Rust compile is slow; later builds are cached in `src-tauri/target`). Tauri starts `pnpm run web:watch` first, which builds `dist/` once before watching.
 - `pnpm run mock` rebuilds the mock repo at `.mock/demo-repo`.
-- `pnpm run web:build` bundles the UI into `dist/` (`scripts/web.mjs`; `--test` exposes `window.__lanes` for tests/ui, real builds drop it).
+- `pnpm run web:build` bundles the UI into `dist/` (`scripts/web.mjs`; `--test` exposes `window.__gitkrapao` for tests/ui, real builds drop it).
 - `pnpm run typecheck` (`tsc --noEmit`), `pnpm run test:ui`, `pnpm run check:bindings` (see TypeScript below), `cd src-tauri && cargo test --lib`.
 - Keep using pnpm; do not switch to bun (the bottleneck is Rust, not the package manager).
 
