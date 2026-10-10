@@ -10,7 +10,8 @@
     "web:build": "node scripts/web.mjs",
     "web:watch": "node scripts/web.mjs --watch",
     "test:ui": "node tests/ui/run.mjs",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "check:bindings": "node scripts/check-bindings.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
