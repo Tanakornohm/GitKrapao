@@ -373,6 +373,7 @@ function readTheme(){
 // Theme switched: the canvas repaints on its own; DOM built with lane colors is rebuilt.
 function applyTheme(){
   if (readTheme()) {
+    closeRefPop();
     for (const el of pool.values()) el.remove();
     pool.clear();
     renderSide();
@@ -384,12 +385,13 @@ function applyTheme(){
 
 function nodeR(c){ return c.parents.length > 1 ? DOT : R; }
 
-function pill(g, col){
+// k: the label's index in its commit's groups (graph labels; the branch menu reads it).
+function pill(g, col, k){
   const isHead = g.head;
   const style = isHead ? `--c:${col};background:${col};color:${textOn(col)}` : `--c:${col};background:${col}2e`;
   const icons = g.kind === 'tag' ? ICON.tag : (g.local ? ICON.laptop : '') + (g.remotes.length ? ICON.cloud : '');
   const title = g.kind === 'tag' ? `Tag ${g.name}` : [isHead ? 'HEAD' : '', g.local ? `Local ${g.name}` : '', ...g.remotes.map(r => `${r}/${g.name}`)].filter(Boolean).join(', ');
-  return `<span class="pill${isHead ? ' head' : ''}" style="${style}" title="${esc(title)}">${isHead ? ICON.check : ''}<span class="name">${esc(g.name)}</span><span class="ic">${icons}</span></span>`;
+  return `<span class="pill${isHead ? ' head' : ''}" style="${style}" title="${esc(title)}"${k === undefined ? '' : ` data-g="${k}"`}>${isHead ? ICON.check : ''}<span class="name">${esc(g.name)}</span><span class="ic">${icons}</span></span>`;
 }
 
 /* opts.remotes: real remote names from `git remote` (desktop); otherwise guessed.
@@ -497,7 +499,7 @@ function makeRow(i){
   const c = S.commits[i], col = c.stashRow ? theme.muted : laneCol(c.color);
   let refs = '';
   if (c.groups.length) {
-    refs = pill(c.groups[0], col);
+    refs = pill(c.groups[0], col, 0);
     if (c.groups.length > 1) refs += `<span class="more" title="${esc(c.groups.slice(1).map(g => g.name).join(', '))}">+${c.groups.length - 1}</span>`;
     refs += `<span class="conn" style="background:${col}"></span>`;
   }
@@ -512,6 +514,38 @@ function makeRow(i){
     + `<div class="col-date" title="${esc(rel(c.time))}">${esc(absDate(c.time))}</div>`;
   return el;
 }
+
+/* "+N": hovering a row's Branch / tag cell lists every label of that commit
+   in a box over the rows below, the first label where it already was. The
+   graph does not move. */
+const refPop = document.createElement('div');
+refPop.className = 'ref-pop'; refPop.hidden = true;
+let refPopI = -1, refPopTimer = 0;   // the row it is for (or about to open for)
+function openRefPop(i){
+  const c = S.commits[i]; if (!c) return;
+  const col = c.stashRow ? theme.muted : laneCol(c.color);
+  // Each label sits on its own opaque backing; the box around them is see-through.
+  refPop.innerHTML = c.groups.map((g, k) => `<span class="ref-item">${pill(g, col, k)}</span>`).join('');
+  refPop.dataset.i = i;
+  refPop.style.top = rowOff + i * ROW_H + 'px';
+  if (!refPop.isConnected) body.append(refPop);
+  refPop.hidden = false;
+}
+function closeRefPop(){ clearTimeout(refPopTimer); refPopTimer = 0; refPopI = -1; refPop.hidden = true; }
+const refCellRow = el => { const cell = el && el.closest && el.closest('.row .col-ref'), row = cell && cell.parentElement; return row && row !== wipRow ? +row.dataset.i : -1; };
+body.addEventListener('mouseover', e => {
+  if (refPop.contains(e.target)) return;
+  const i = refCellRow(e.target);
+  if (i === refPopI) return;
+  closeRefPop();
+  if (i >= 0 && S.commits[i].groups.length > 1) { refPopI = i; refPopTimer = setTimeout(() => openRefPop(i), 120); }
+});
+body.addEventListener('mouseout', e => {
+  // Moving between the cell and its box (or within the box) keeps it.
+  const to = e.relatedTarget;
+  if (refPopI < 0 || (to && refPop.contains(to)) || refCellRow(to) === refPopI) return;
+  closeRefPop();
+});
 
 /* Index edges by row tile so a frame only looks at edges near the viewport. */
 function buildTiles(){
@@ -669,6 +703,7 @@ function updateView(){
 
 function render(keepHash, keepScroll){
   const n = S.commits.length;
+  closeRefPop();
   for (const el of pool.values()) el.remove();
   pool.clear();
   if (!canvas.isConnected) body.append(canvas, moreRow, wipRow);
@@ -1916,10 +1951,10 @@ sideList.addEventListener('contextmenu', e => {
   openCtx(e, entries, el);
 });
 body.addEventListener('contextmenu', e => {
-  const pill = e.target.closest('.pill'), row = pill && pill.closest('.row');
-  if (!row || row === wipRow) return;
-  // A label is the first ref group of its commit: one name, local and/or on remotes.
-  const c = S.commits[+row.dataset.i], g = c && c.groups[0];
+  const pill = e.target.closest('.pill'), host = pill && pill.closest('.row, .ref-pop');
+  if (!host || host === wipRow) return;
+  // A label is one ref group of its commit (data-g): one name, local and/or on remotes.
+  const c = S.commits[+host.dataset.i], g = c && c.groups[+pill.dataset.g || 0];
   if (!g || g.kind !== 'branch' || g.name === 'HEAD (detached)') return;
   const refs = (g.local ? ['refs/heads/' + g.name] : []).concat(g.remotes.map(r => `refs/remotes/${r}/${g.name}`));
   const solo = soloList().length > 0;
@@ -2167,6 +2202,7 @@ function closeModal(){ $('#modal').hidden = true; }
 
 /* ---------- events ---------- */
 body.addEventListener('click', e => {
+  const pop = e.target.closest('.ref-pop'); if (pop) { select(+pop.dataset.i, { open: true }); return; }
   const r = e.target.closest('.row'); if (!r) return;
   if (r === wipRow) selectWip({ open: true }); else select(+r.dataset.i, { open: true });
 });
@@ -2263,7 +2299,7 @@ $('#themeBtn').addEventListener('click', () => {
 });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
-wrap.addEventListener('scroll', scheduleDraw, { passive: true });
+wrap.addEventListener('scroll', () => { closeRefPop(); scheduleDraw(); }, { passive: true });
 new ResizeObserver(scheduleDraw).observe(wrap);
 
 /* ---------- boot ---------- */
