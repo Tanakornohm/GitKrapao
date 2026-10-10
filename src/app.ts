@@ -9,6 +9,7 @@ import type { AppState, Card, Commit, Edge, Layout, RawCommit, RefGroup, Shown }
 import type { Refs } from './bindings/Refs';
 import type { RepoInfo } from './bindings/RepoInfo';
 import type { Stash } from './bindings/Stash';
+import type { PullRequest } from './bindings/PullRequest';
 import type { Track } from './bindings/Track';
 import type { WorkFile } from './bindings/WorkFile';
 import type { WorkStatus } from './bindings/WorkStatus';
@@ -1674,7 +1675,7 @@ async function loadStashes(){
   try {
     const list = await invoke('list_stashes', { path });
     if (seq !== stashSeq || !current || current.path !== path) return;
-    stashes = list.map(st => ({ ...st, card: 'stash', key: 'S:' + st.sha }));
+    stashes = list.map(st => ({ ...st, card: 'stash' as const, key: 'S:' + st.sha }));
     stashPath = path;
     placeStashes();
     refreshCard();
@@ -1683,10 +1684,10 @@ async function loadStashes(){
 }
 
 // "On main: message" -> message; "WIP on main: 1a2b3c4 subject" -> WIP on main
-function stashLabel(st){
+function stashLabel(st: Stash){
   const m = st.message.match(/^(WIP on|On) ([^:]*): ([\s\S]*)$/);
   if (!m) return { label: st.message, branch: '' };
-  return { label: m[1] === 'On' ? m[3] : `WIP on ${m[2]}`, branch: m[2] };
+  return { label: m[1] === 'On' ? m[3]! : `WIP on ${m[2]}`, branch: m[2]! };
 }
 
 /* Stash rows: each stash also sits in the graph as its own row above the
@@ -1695,9 +1696,10 @@ function stashLabel(st){
    redone, but only when the set of stashes whose base is loaded changes:
    after the stash list changes, after a full reload, and when a new page
    brings in a stash's base. Returns 'relayout', 'names' or false. */
-function stashRowOf(st){
-  return { hash: st.sha, parents: [st.parents[0]], author: 'Stash', email: '', time: st.time, ctime: st.time,
-           subject: stashLabel(st).label, dec: '', stashRow: true, stashKey: st.key, stashName: st.name };
+// A stash always has its base as first parent. Row fields come from prepCommit/layoutRows.
+function stashRowOf(st: StashItem){
+  return { hash: st.sha, parents: [st.parents[0]!], author: 'Stash', email: '', time: st.time, ctime: st.time,
+           subject: stashLabel(st).label, dec: '', stashRow: true, stashKey: st.key, stashName: st.name } as Commit;
 }
 /* Gives each stash row the first lane right of its base commit that is free
    on every row between the two (no node, no other line), so it sits beside
@@ -1708,8 +1710,9 @@ function laneStashes(){
   const n = S.commits.length;
   S.commits.forEach((c, s) => {
     if (!c.stashRow) return;
-    const b = S.idx.get(c.parents[0]), base = S.commits[b], taken = new Set();
-    for (let r = s; r <= b; r++) if (!S.commits[r].stashRow) taken.add(S.commits[r].lane);
+    // Stash rows are placed only when their base commit is loaded (placeStashes).
+    const b = S.idx.get(c.parents[0]!)!, base = S.commits[b]!, taken = new Set<number>();
+    for (let r = s; r <= b; r++) if (!S.commits[r]!.stashRow) taken.add(S.commits[r]!.lane);
     for (const e of S.edges) {
       const t = e.to >= 0 ? e.to : n;
       if (t < s || e.from > b) continue;
@@ -1722,16 +1725,16 @@ function laneStashes(){
     c.lane = x; c.color = -1;
     S.edges.push({ from: s, fromLane: x, lane: x, to: b, toLane: base.lane, color: -1 });
     base.children.push(s);
-    if (x > S.stashLaneMax) S.stashLaneMax = x;
+    if (x > S.stashLaneMax!) S.stashLaneMax = x;   // set to 0 above
   });
 }
 
-function placeStashes({ render: redraw = true } = {}){
+function placeStashes({ render: redraw = true }: { render?: boolean } = {}){
   if (!NATIVE || !S.commits.length) return false;
   const list = current && stashPath === current.path ? stashes : [];
-  const want = list.filter(st => { const i = S.idx.get(st.parents[0]); return i !== undefined && !S.commits[i].stashRow; });
+  const want = list.filter(st => { const i = S.idx.get(st.parents[0]!); return i !== undefined && !S.commits[i]!.stashRow; });
   const have = S.commits.filter(c => c.stashRow);
-  const ids = a => a.map(x => x.sha || x.hash).sort().join();
+  const ids = (a: (StashItem | Commit)[]) => a.map(x => 'sha' in x ? x.sha : x.hash).sort().join();
   if (ids(want) === ids(have)) {
     // Same stashes; only stash@{n} may have shifted after a push or pop.
     let renamed = false;
@@ -1739,22 +1742,23 @@ function placeStashes({ render: redraw = true } = {}){
     if (renamed && redraw) { for (const el of pool.values()) el.remove(); pool.clear(); scheduleDraw(); }
     return renamed ? 'names' : false;
   }
-  const keepHash = S.commits[sel] ? S.commits[sel].hash : null;
+  const keepHash = S.commits[sel]?.hash ?? null;
   const anchor = scrollAnchor(), top = wrap.scrollTop, left = wrap.scrollLeft;
   const real = S.commits.filter(c => !c.stashRow);
-  const rows = want.map(stashRowOf).sort((x, y) => y.ctime - x.ctime);
+  const rows = want.map(stashRowOf).sort((x, y) => y.ctime! - x.ctime!);
   S.commits = mergeNew(rows, real, new Map(real.map((c, i) => [c.hash, i])));
   S.idx = new Map(S.commits.map((c, i) => [c.hash, i]));
   rows.forEach(prepCommit);
   S.edges = []; S.lay = newLayout();
   layoutRows(S.lay, S.commits, 0, S.idx, S.edges);
   laneStashes();
-  S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax); S.stashRows = rows.length;
+  S.maxLane = Math.max(S.lay.maxLane, S.stashLaneMax!); S.stashRows = rows.length;
   if (redraw) render(keepHash, { top: anchoredTop(anchor, top), left });
   return 'relayout';
 }
 
-function stashSection(q, empty){
+type EmptyRow = (level: number, text: string) => string;
+function stashSection(q: string, empty: EmptyRow){
   const list = current && stashPath === current.path ? stashes : [];
   const items = list.filter(st => !q || `${st.name} ${st.message}`.toLowerCase().includes(q));
   const html = items.map(st => {
@@ -1767,7 +1771,7 @@ function stashSection(q, empty){
     html || empty(2, q ? 'No matches' : 'No stashes'), 'sb-sec');
 }
 
-function showStash(key){
+function showStash(key: string){
   const st = stashes.find(x => x.key === key); if (!st) return;
   stashCard(st);
   if (narrowView()) detail.classList.add('open');
@@ -1775,12 +1779,12 @@ function showStash(key){
   // that was later rebased away is in no branch, so searching for it would
   // read the whole history for nothing.
   if (S.idx.has(st.sha)) jumpTo(st.sha, { detail: false });   // its own row in the graph
-  else if (S.idx.has(st.parents[0])) jumpTo(st.parents[0], { detail: false });
+  else if (S.idx.has(st.parents[0]!)) jumpTo(st.parents[0]!, { detail: false });
   else markSide();
 }
-function stashCard(st){
+function stashCard(st: StashItem){
   const base = st.parents[0], { label, branch } = stashLabel(st);
-  const c = { card: 'stash', stash: true, key: st.key, hash: st.sha, parents: st.parents };
+  const c: Extract<Card, { card: 'stash' }> = { card: 'stash', stash: true, key: st.key, hash: st.sha, parents: st.parents };
   detailFor = c;
   detail.innerHTML =
     `<div class="d-top"><span class="k">Stash</span><code>${esc(st.name)}</code><button class="btn sm" data-copy="${esc(st.sha)}">Copy SHA</button><button class="btn icon-btn sm d-close" aria-label="Close details">✕</button></div>`
@@ -1801,17 +1805,21 @@ function stashCard(st){
 function refreshCard(){
   const d = detailFor; if (!d || !d.card) return;
   const now = d.card === 'stash' ? stashes.find(x => x.key === d.key) : prs.items.find(x => x.key === d.key);
-  if (!now) { if (S.commits[sel]) renderDetail(S.commits[sel]); else { detailFor = null; detail.innerHTML = ''; } }
-  else if (d.card === 'stash') stashCard(now);
-  else prCard(now);
+  const cur = S.commits[sel];
+  if (!now) { if (cur) renderDetail(cur); else { detailFor = null; detail.innerHTML = ''; } }
+  // now came from the list that matches d.card.
+  else if (d.card === 'stash') stashCard(now as StashItem);
+  else prCard(now as PrItem);
 }
 
-let prs = { path: null, state: 'idle', items: [], repo: null, error: '', at: 0 };
+type PrItem = PullRequest & { card: 'pr'; key: string };
+interface PrState { path: string | null; state: 'idle' | 'loading' | 'ok' | 'none' | 'error'; items: PrItem[]; repo: string | null; error: string; at: number }
+let prs: PrState = { path: null, state: 'idle', items: [], repo: null, error: '', at: 0 };
 let prSeq = 0;
 const PR_EVERY = 5 * 60e3;   // pull requests change on the server; ask again this often
 /* minAge: skip if the list is newer than this. A sync (commit, fetch, a new
    remote URL) asks sooner than the timer, a manual refresh (force) always. */
-async function loadPrs({ force = false, minAge = PR_EVERY } = {}){
+async function loadPrs({ force = false, minAge = PR_EVERY }: { force?: boolean; minAge?: number } = {}){
   if (!NATIVE || !current) return;
   const path = current.path;
   if (prs.path !== path) prs = { path, state: 'loading', items: [], repo: null, error: '', at: 0 };
@@ -1823,7 +1831,7 @@ async function loadPrs({ force = false, minAge = PR_EVERY } = {}){
     const r = await invoke('pull_requests', { path });
     if (seq !== prSeq || prs.path !== path) return;
     prs = { ...prs, state: r.repo ? 'ok' : 'none', repo: r.repo, error: '',
-            items: r.items.map(p => ({ ...p, card: 'pr', key: 'PR:' + p.id })) };
+            items: r.items.map(p => ({ ...p, card: 'pr' as const, key: 'PR:' + p.id })) };
     refreshCard();
   } catch (e) {
     if (seq !== prSeq || prs.path !== path) return;
@@ -1832,20 +1840,20 @@ async function loadPrs({ force = false, minAge = PR_EVERY } = {}){
   renderSide();
 }
 
-const shortRef = r => r.replace(/^refs\/heads\//, '');
-const colorOf = s => { let h = 0; for (const ch of s) h = (h * 31 + ch.codePointAt(0)) | 0; return Math.abs(h) % PALETTE.length; };
-const VOTE = { 10: 'Approved', 5: 'Approved with suggestions', 0: 'No vote', '-5': 'Waiting for author', '-10': 'Rejected' };
-function prVotes(p){
-  const n = f => p.reviewers.filter(r => f(r.vote)).length;
-  return [[n(v => v >= 5), 'approved'], [n(v => v === -5), 'waiting for author'], [n(v => v <= -10), 'rejected']]
+const shortRef = (r: string) => r.replace(/^refs\/heads\//, '');
+const colorOf = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.codePointAt(0)!) | 0; return Math.abs(h) % PALETTE.length; };
+const VOTE: Record<number, string> = { 10: 'Approved', 5: 'Approved with suggestions', 0: 'No vote', '-5': 'Waiting for author', '-10': 'Rejected' };
+function prVotes(p: PrItem){
+  const n = (f: (v: number) => boolean) => p.reviewers.filter(r => f(r.vote)).length;
+  return ([[n(v => v >= 5), 'approved'], [n(v => v === -5), 'waiting for author'], [n(v => v <= -10), 'rejected']] as [number, string][])
     .filter(([k]) => k).map(([k, t]) => `${k} ${t}`).join(', ');
 }
-function avatar(name, cls){
+function avatar(name: string, cls: string){
   const k = colorOf(name);
   return `<span class="${cls}" style="background:${PALETTE[k]};color:${ON_COL[k]}">${esc(initials(name))}</span>`;
 }
 
-function prSection(q, empty){
+function prSection(q: string, empty: EmptyRow){
   const mine = current && prs.path === current.path;
   const items = (mine ? prs.items : []).filter(p => !q || `#${p.id} ${p.title} ${p.author} ${p.source}`.toLowerCase().includes(q));
   let body = '';
@@ -1868,38 +1876,38 @@ function prSection(q, empty){
 /* The source branch as fetched (origin first, then other remotes, then a
    local branch of the same name), else the PR's last pushed commit if it is
    already loaded. Never an unloaded commit: it may not be in the repo at all. */
-function prTip(p){
+function prTip(p: PrItem): string | null{
   const name = shortRef(p.source), refs = shownRefs().refs;
-  const find = full => { const r = refs.find(([, n]) => n === full); return r && r[0]; };
-  const remotes = [...S.remotes].sort((a, b) => (b === 'origin') - (a === 'origin'));
+  const find = (full: string) => { const r = refs.find(([, n]) => n === full); return r && r[0]; };
+  const remotes = [...S.remotes!].sort((a, b) => +(b === 'origin') - +(a === 'origin'));
   return remotes.map(r => find(`refs/remotes/${r}/${name}`)).find(Boolean) || find(`refs/heads/${name}`)
     || (p.sourceSha && S.idx.has(p.sourceSha) ? p.sourceSha : null);
 }
 
 /* The PR's source branch exists here but every copy of it is hidden. */
-function srcHidden(src){
+function srcHidden(src: string){
   if (!S.refs) return false;
   const have = new Set(S.refs.refs.map(([, n]) => n)), shown = new Set(shownRefs().refs.map(([, n]) => n));
-  const names = [`refs/heads/${src}`, ...[...S.remotes].map(r => `refs/remotes/${r}/${src}`)].filter(n => have.has(n));
+  const names = [`refs/heads/${src}`, ...[...S.remotes!].map(r => `refs/remotes/${r}/${src}`)].filter(n => have.has(n));
   return names.length > 0 && names.every(n => !shown.has(n));
 }
 
-function showPr(key){
+function showPr(key: string){
   const p = prs.items.find(x => x.key === key); if (!p) return;
   const tip = prCard(p);
   if (narrowView()) detail.classList.add('open');
   if (tip) jumpTo(tip, { detail: false }); else markSide();
 }
-function prCard(p){
+function prCard(p: PrItem){
   detailFor = { card: 'pr', key: p.key };
   const created = Date.parse(p.created) / 1000, tip = prTip(p);
   const src = shortRef(p.source), dst = shortRef(p.target);
-  const at = tip !== null && S.idx.has(tip) ? laneCol(S.commits[S.idx.get(tip)].color) : PALETTE[1];
+  const at = tip !== null && S.idx.has(tip) ? laneCol(S.commits[S.idx.get(tip)!]!.color) : PALETTE[1];
   const badges = [p.draft ? '<span class="d-badge">Draft</span>' : '',
     p.mergeStatus === 'conflicts' ? '<span class="d-badge warn">Merge conflicts</span>' : '',
     p.mergeStatus === 'rejectedByPolicy' ? '<span class="d-badge warn">Blocked by policy</span>' : ''].join('');
   // Groups come as "[Project]\Team"; the team name is enough.
-  const who = n => n.replace(/^\[[^\]]*\]\\/, '');
+  const who = (n: string) => n.replace(/^\[[^\]]*\]\\/, '');
   const reviewers = p.reviewers.length
     ? `<ul class="d-reviewers">${p.reviewers.map(r => `<li>${avatar(who(r.name), 'sb-av')}<span class="n" title="${esc(r.name)}">${esc(who(r.name))}</span><span class="v v${r.vote}">${esc(VOTE[r.vote] || 'No vote')}</span></li>`).join('')}</ul>`
     : '<span class="muted">None</span>';
@@ -1918,50 +1926,52 @@ function prCard(p){
   return tip;
 }
 
-function sideToggle(el, open = el.getAttribute('aria-expanded') !== 'true'){
+// Tree items always carry data-key; branch leaves also data-sha, and the eye/solo buttons their ref.
+function sideToggle(el: HTMLElement, open = el.getAttribute('aria-expanded') !== 'true'){
   el.setAttribute('aria-expanded', String(open));
-  if ($('#bq').value.trim()) return;   // filtering opens everything; don't remember that
-  if (open) sideClosed.delete(el.dataset.key); else sideClosed.add(el.dataset.key);
+  if ($<HTMLInputElement>('#bq').value.trim()) return;   // filtering opens everything; don't remember that
+  if (open) sideClosed.delete(el.dataset.key!); else sideClosed.add(el.dataset.key!);
   lsSet('lanes.sideClosed', JSON.stringify([...sideClosed]));
 }
-function sideActivate(el){
+function sideActivate(el: HTMLElement){
   const kind = el.dataset.kind;
   if (kind) closeDiff();   // the graph is about to move: show it
   // A hidden or out-of-solo tip is usually not in the graph; jump only if it is loaded anyway.
-  if (kind === 'branch') { if (!el.classList.contains('is-hidden') || S.idx.has(el.dataset.sha)) jumpTo(el.dataset.sha); }
-  else if (kind === 'stash') showStash(el.dataset.key);
-  else if (kind === 'pr') showPr(el.dataset.key);
+  if (kind === 'branch') { if (!el.classList.contains('is-hidden') || S.idx.has(el.dataset.sha!)) jumpTo(el.dataset.sha!); }
+  else if (kind === 'stash') showStash(el.dataset.key!);
+  else if (kind === 'pr') showPr(el.dataset.key!);
   else sideToggle(el);
 }
-function sideMoveTo(el, focus = true){
+function sideMoveTo(el: HTMLElement | null | undefined, focus = true){
   if (!el) return;
-  sideList.querySelectorAll('[role="treeitem"][tabindex="0"]').forEach(x => { x.tabIndex = -1; });
+  sideList.querySelectorAll<HTMLElement>('[role="treeitem"][tabindex="0"]').forEach(x => { x.tabIndex = -1; });
   el.tabIndex = 0; sideFocus = el.dataset.key; if (focus) el.focus();
 }
-const sideVisible = () => [...sideList.querySelectorAll('[role="treeitem"]')]
-  .filter(el => !el.parentElement.closest('[aria-expanded="false"]'));
+const sideVisible = () => [...sideList.querySelectorAll<HTMLElement>('[role="treeitem"]')]
+  .filter(el => !el.parentElement!.closest('[aria-expanded="false"]'));
 
 sideList.addEventListener('click', e => {
-  const row = e.target.closest('.sb-row'); if (!row) return;
-  const el = row.parentElement;
+  const t = e.target as Element;
+  const row = t.closest('.sb-row'); if (!row) return;
+  const el = row.parentElement!;   // the tree item
   sideMoveTo(el);
-  const eye = e.target.closest('[data-hide]'), solo = e.target.closest('[data-solo]');
-  if (eye) toggleHidden(eye.dataset.hide);
-  else if (solo) toggleSolo(solo.dataset.solo);
+  const eye = t.closest<HTMLElement>('[data-hide]'), solo = t.closest<HTMLElement>('[data-solo]');
+  if (eye) toggleHidden(eye.dataset.hide!);
+  else if (solo) toggleSolo(solo.dataset.solo!);
   else sideActivate(el);
 });
 $('#showAllBtn').addEventListener('click', () => (soloList().length ? exitSolo() : showAllBranches()));
 sideList.addEventListener('keydown', e => {
-  const el = e.target.closest('[role="treeitem"]'); if (!el) return;
+  const el = (e.target as Element).closest<HTMLElement>('[role="treeitem"]'); if (!el) return;
   const vis = sideVisible(), k = vis.indexOf(el);
   const isNode = el.hasAttribute('aria-expanded'), open = el.getAttribute('aria-expanded') === 'true';
-  const parent = el.parentElement.closest('[role="treeitem"]');
+  const parent = el.parentElement!.closest<HTMLElement>('[role="treeitem"]');
   let done = true;
   if (e.key === 'ArrowDown') sideMoveTo(vis[k + 1]);
   else if (e.key === 'ArrowUp') sideMoveTo(vis[k - 1]);
   else if (e.key === 'Home') sideMoveTo(vis[0]);
   else if (e.key === 'End') sideMoveTo(vis[vis.length - 1]);
-  else if (e.key === 'ArrowRight') { if (isNode && !open) sideToggle(el, true); else if (isNode) sideMoveTo(el.querySelector('[role="treeitem"]')); }
+  else if (e.key === 'ArrowRight') { if (isNode && !open) sideToggle(el, true); else if (isNode) sideMoveTo(el.querySelector<HTMLElement>('[role="treeitem"]')); }
   else if (e.key === 'ArrowLeft') { if (isNode && open) sideToggle(el, false); else sideMoveTo(parent); }
   else if (e.key === 'Enter' || e.key === ' ') sideActivate(el);
   else if (e.ctrlKey || e.metaKey || e.altKey || !el.dataset.ref) done = false;
@@ -1973,18 +1983,21 @@ sideList.addEventListener('keydown', e => {
 });
 $('#bq').addEventListener('input', renderSide);
 $('#bq').addEventListener('keydown', e => {
-  if (e.key === 'Escape' && e.target.value) { e.target.value = ''; renderSide(); e.stopPropagation(); }
+  const t = e.target as HTMLInputElement;
+  if (e.key === 'Escape' && t.value) { t.value = ''; renderSide(); e.stopPropagation(); }
   if (e.key === 'ArrowDown') { e.preventDefault(); sideMoveTo(sideVisible()[0]); }
 });
 
 /* branch menu: right-click a branch, folder or remote in the panel, or a
    branch label in the graph. Hide follows the eye button's rules. */
 const ctxMenu = $('#ctxMenu');
-let ctxRun = [], ctxBack = null, ctxKeys = false;   // item actions; what gets focus back; keyboard in use
-function openCtx(e, entries, back){
+interface CtxEntry { label: string; off?: string; run: () => void }
+let ctxRun: (() => void)[] = [], ctxBack: HTMLElement | null = null, ctxKeys = false;   // item actions; what gets focus back; keyboard in use
+function openCtx(e: MouseEvent, entries: CtxEntry[], back: HTMLElement | null){
   e.preventDefault();
-  // From the Menu key / Shift+F10: pointerType '' (or no position at all).
-  ctxKeys = e.pointerType === '' || (!e.pointerType && !e.clientX && !e.clientY);
+  // From the Menu key / Shift+F10: pointerType '' (or no position at all). WebView2 sends a PointerEvent.
+  const pointerType = (e as PointerEvent).pointerType;
+  ctxKeys = pointerType === '' || (!pointerType && !e.clientX && !e.clientY);
   ctxRun = entries.map(x => x.run); ctxBack = back;
   ctxMenu.innerHTML = entries.map((x, k) => `<button class="menu-item" role="menuitem" data-k="${k}"${x.off ? ' disabled' : ''}>`
     + `<span class="n">${esc(x.label)}</span>${x.off ? `<span class="p">${esc(x.off)}</span>` : ''}</button>`).join('');
@@ -1997,33 +2010,33 @@ function openCtx(e, entries, back){
   ctxMenu.style.top = Math.max(4, Math.min(y, innerHeight - m.height - 4)) + 'px';
   // A mouse user gets no focus ring: the menu itself (no outline) holds focus
   // for the arrow keys, and items light up on hover.
-  ((ctxKeys && ctxMenu.querySelector('.menu-item:not(:disabled)')) || ctxMenu).focus();
+  ((ctxKeys && ctxMenu.querySelector<HTMLElement>('.menu-item:not(:disabled)')) || ctxMenu).focus();
 }
-function closeCtx(refocus){
+function closeCtx(refocus: boolean){
   if (ctxMenu.hidden) return;
   ctxMenu.hidden = true; ctxRun = [];
   if (refocus && ctxKeys && ctxBack && ctxBack.isConnected) ctxBack.focus();
-  else if (ctxMenu.contains(document.activeElement)) document.activeElement.blur();
+  else if (ctxMenu.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
   ctxBack = null;
 }
 const SOLO_OFF = 'Exit solo to hide branches', HEAD_OFF = 'The checked-out branch is always shown';
 
 sideList.addEventListener('contextmenu', e => {
-  const el = e.target.closest('[role="treeitem"]');
+  const el = (e.target as Element).closest<HTMLElement>('[role="treeitem"]');
   const leaf = el && el.dataset.kind === 'branch';
   if (!el || !el.dataset.ref || !(leaf || el.classList.contains('sb-node'))) return;
   sideMoveTo(el, false);
   const ref = el.dataset.ref, solo = soloList().length > 0;
   const show = !solo && el.classList.contains('is-hidden');
-  const entries = [{ label: show ? 'Show' : 'Hide', off: solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : '', run: () => toggleHidden(ref) }];
+  const entries: CtxEntry[] = [{ label: show ? 'Show' : 'Hide', off: solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : '', run: () => toggleHidden(ref) }];
   if (leaf) entries.push({ label: 'Copy branch name', run: () => copyText(refLabel(ref)) });
   openCtx(e, entries, el);
 });
 body.addEventListener('contextmenu', e => {
-  const pill = e.target.closest('.pill'), host = pill && pill.closest('.row, .ref-pop');
-  if (!host || host === wipRow) return;
+  const pill = (e.target as Element).closest<HTMLElement>('.pill'), host = pill && pill.closest<HTMLElement>('.row, .ref-pop');
+  if (!pill || !host || host === wipRow) return;
   // A label is one ref group of its commit (data-g): one name, local and/or on remotes.
-  const c = S.commits[+host.dataset.i], g = c && c.groups[+pill.dataset.g || 0];
+  const c = S.commits[+host.dataset.i!], g = c && c.groups[+pill.dataset.g! || 0];
   if (!g || g.kind !== 'branch' || g.name === 'HEAD (detached)') return;
   const refs = (g.local ? ['refs/heads/' + g.name] : []).concat(g.remotes.map(r => `refs/remotes/${r}/${g.name}`));
   const solo = soloList().length > 0;
@@ -2033,19 +2046,19 @@ body.addEventListener('contextmenu', e => {
   ], null);
 });
 ctxMenu.addEventListener('click', e => {
-  const b = e.target.closest('.menu-item'); if (!b || b.disabled) return;
-  const run = ctxRun[+b.dataset.k];
+  const b = (e.target as Element).closest<HTMLButtonElement>('.menu-item'); if (!b || b.disabled) return;
+  const run = ctxRun[+b.dataset.k!]!;   // data-k indexes the entries openCtx rendered
   closeCtx(true); run();
 });
 ctxMenu.addEventListener('keydown', e => {
   e.stopPropagation();   // the graph and panel keys stay off while the menu is open
   ctxKeys = true;        // from here on, focus rings and returning focus are wanted
-  const on = [...ctxMenu.querySelectorAll('.menu-item:not(:disabled)')], k = on.indexOf(document.activeElement);
-  const to = { ArrowDown: k + 1, ArrowUp: k < 0 ? -1 : k - 1, Home: 0, End: on.length - 1 }[e.key];
+  const on = [...ctxMenu.querySelectorAll<HTMLElement>('.menu-item:not(:disabled)')], k = on.indexOf(document.activeElement as HTMLElement);
+  const to = ({ ArrowDown: k + 1, ArrowUp: k < 0 ? -1 : k - 1, Home: 0, End: on.length - 1 } as Record<string, number>)[e.key];
   if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeCtx(true); }
-  else if (to !== undefined && on.length) { e.preventDefault(); on[(to + on.length) % on.length].focus(); }
+  else if (to !== undefined && on.length) { e.preventDefault(); on[(to + on.length) % on.length]!.focus(); }
 });
-document.addEventListener('pointerdown', e => { if (!ctxMenu.contains(e.target)) closeCtx(false); }, true);
+document.addEventListener('pointerdown', e => { if (!ctxMenu.contains(e.target as Node)) closeCtx(false); }, true);
 [wrap, sideList].forEach(el => el.addEventListener('scroll', () => closeCtx(false), { passive: true }));
 window.addEventListener('blur', () => closeCtx(false));
 window.addEventListener('resize', () => closeCtx(false));
@@ -2054,7 +2067,7 @@ window.addEventListener('resize', () => closeCtx(false));
 const SIDE = { min: 160, max: 520, def: 200 };
 const appEl = $('.app'), side = $('#side'), sideRz = $('.side-resizer');
 const narrowView = () => matchMedia('(max-width: 900px)').matches;
-let sideW = +lsGet('lanes.sidew');
+let sideW = +lsGet('lanes.sidew')!;   // NaN when unset, caught by the range check below
 if (!(sideW >= SIDE.min && sideW <= SIDE.max)) sideW = SIDE.def;
 // On a small screen the panel floats over the graph, so it starts closed.
 let sideShown = !narrowView() && lsGet('lanes.side') !== '0';
@@ -2074,12 +2087,12 @@ sideRz.setAttribute('aria-valuemax', String(SIDE.max));
 applySide();
 $('#sideBtn').addEventListener('click', () => showSide());
 {
-  const set = w => { sideW = Math.round(Math.max(SIDE.min, Math.min(SIDE.max, w))); applySide(); };
+  const set = (w: number) => { sideW = Math.round(Math.max(SIDE.min, Math.min(SIDE.max, w))); applySide(); };
   const save = () => lsSet('lanes.sidew', String(sideW));
   sideRz.addEventListener('pointerdown', e => {
     e.preventDefault(); sideRz.setPointerCapture(e.pointerId); sideRz.classList.add('drag');
     const startX = e.clientX, startW = sideW;
-    const move = ev => set(startW + ev.clientX - startX);
+    const move = (ev: PointerEvent) => set(startW + ev.clientX - startX);
     const up = () => { sideRz.classList.remove('drag'); sideRz.removeEventListener('pointermove', move); sideRz.removeEventListener('pointerup', up); save(); };
     sideRz.addEventListener('pointermove', move); sideRz.addEventListener('pointerup', up);
   });
@@ -2091,27 +2104,27 @@ $('#sideBtn').addEventListener('click', () => showSide());
 }
 
 /* ---------- banner ---------- */
-function showError(msg){ $('#bannerMsg').textContent = msg; $('#banner').hidden = false; }
+function showError(msg: string){ $('#bannerMsg').textContent = msg; $('#banner').hidden = false; }
 function hideError(){ $('#banner').hidden = true; }
 $('#bannerClose').addEventListener('click', hideError);
 
 /* ---------- desktop: real repositories ---------- */
 let current: RepoInfo | null = null;
-let fingerprintSeen = null;
+let fingerprintSeen: string | null = null;
 let busy = false, moreBusy = false;
 let streamGen = 0;           // backend history stream the loaded rows came from
 let streamPos = 0;           // records consumed from that stream (rows can also come from syncs)
 const SYNC_CAP = 5000;       // more new commits than this: reload instead of merging
 
-function recentList(){ return lsJSON('lanes.recent', []).filter(r => r && r.path); }
-function addRecent(info){
+function recentList(){ return lsJSON<RepoInfo[]>('lanes.recent', []).filter(r => r && r.path); }
+function addRecent(info: RepoInfo){
   const list = recentList().filter(r => r.path !== info.path);
   list.unshift({ path: info.path, name: info.name });
   lsSet('lanes.recent', JSON.stringify(list.slice(0, 8)));
 }
-function forgetRecent(path){ lsSet('lanes.recent', JSON.stringify(recentList().filter(r => r.path !== path))); }
+function forgetRecent(path: string){ lsSet('lanes.recent', JSON.stringify(recentList().filter(r => r.path !== path))); }
 
-function recentButtons(cls){
+function recentButtons(cls: string){
   return recentList().map(r => `<button class="${cls}" data-path="${esc(r.path)}" title="${esc(r.path)}"><span class="n">${esc(r.name)}</span><span class="p">${esc(r.path)}</span></button>`).join('');
 }
 function showEmpty(){
@@ -2120,7 +2133,7 @@ function showEmpty(){
   $('#emptyRecent').innerHTML = items ? `<div class="t">Recent</div>${items}` : '';
 }
 
-async function loadRepo(info, { keep = false, manual = false } = {}){
+async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep?: boolean; manual?: boolean } = {}){
   if (busy) return;
   busy = true; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
@@ -2151,11 +2164,11 @@ async function loadRepo(info, { keep = false, manual = false } = {}){
   } finally {
     busy = false; document.body.classList.remove('loading');
     // Branches were hidden or shown while this ran with the old list.
-    if (hg !== hiddenGen && current) setTimeout(() => loadRepo(current, { keep: true }), 0);
+    if (hg !== hiddenGen && current) setTimeout(() => loadRepo(current!, { keep: true }), 0);   // read when it runs, as before
   }
 }
 
-async function openPath(path, { quiet = false } = {}){
+async function openPath(path: string, { quiet = false }: { quiet?: boolean } = {}){
   try {
     const info = await invoke('open_repo', { path });
     closeMenu();
@@ -2179,7 +2192,7 @@ async function pickRepo(){
 /* Infinite scroll: append the next page of the current stream. A reload
    that starts a new stream meanwhile makes this result stale.
    Returns true when a page was added, 'skip' when nothing ran, false on error. */
-async function loadMore(){
+async function loadMore(): Promise<boolean | 'skip'>{
   if (!NATIVE || !current || busy || moreBusy || !S.more) return 'skip';
   moreBusy = true;
   const gen = streamGen, start = streamPos;
@@ -2189,10 +2202,11 @@ async function loadMore(){
     const { commits, bad } = parseLog(page.log);
     streamPos += commits.length + bad.length;
     appendCommits(commits);
-    S.more = page.more && commits.length > 0; S.capped = page.capped; S.bad += bad.length;
+    S.more = page.more && commits.length > 0; S.capped = page.capped; S.bad! += bad.length;   // set by loadRepo
     updateView();
-    if ($('#q').value.trim()) runSearch();
-    if (S.commits[sel] && detailFor === S.commits[sel]) renderDetail(S.commits[sel]);   // parents may now be loaded
+    if ($<HTMLInputElement>('#q').value.trim()) runSearch();
+    const cur = S.commits[sel];
+    if (cur && detailFor === cur) renderDetail(cur);   // parents may now be loaded
     if (sideWaiting.some(h => S.idx.has(h))) renderSide();   // branch tips now in view
     placeStashes();   // this page may hold a stash's base
   } catch (e) {
@@ -2214,12 +2228,13 @@ async function refresh(){ if (current) await loadRepo(current, { keep: true, man
    reload at the same depth. */
 async function syncRepo(){
   if (!current || busy || moreBusy) return;
-  let full = S.forceFull ? 'refs may be newer than the loaded rows' : null;
+  let full: string | null = S.forceFull ? 'refs may be newer than the loaded rows' : null;
   if (!full) {
     busy = true;
     const hg = hiddenGen, hidden = hiddenList(), solo = soloList();
     try {
-      const r = await invoke('sync_history', { path: current.path, exclude: [...S.tips], hidden, solo, limit: SYNC_CAP });
+      // A loaded desktop repo always has tips (setData).
+      const r = await invoke('sync_history', { path: current.path, exclude: [...S.tips!], hidden, solo, limit: SYNC_CAP });
       if (hg !== hiddenGen) full = 'hidden branches changed';
       else if (r.fingerprintBefore !== r.fingerprintAfter) full = 'repo changed while reading';
       else if (r.over) full = 'too many new commits';
@@ -2227,9 +2242,10 @@ async function syncRepo(){
         const { commits, bad } = parseLog(r.log);
         // Tips and labels from visible refs only, as in a full load; the
         // panel keeps the whole listing.
-        const plan = bad.length ? { full: 'unreadable entries' } : planSync(S, walkRefs(r.refs, hidden, solo), commits, labelRefs(r.refs, hidden, solo));
-        if (!plan.full) plan.allRefs = r.refs;
-        if (plan.full) full = plan.full;
+        // The reasons in { full } are never empty, so a string full is the same test as a truthy one.
+        const plan: { full: string } | SyncPlan = bad.length ? { full: 'unreadable entries' } : planSync(S as SyncFrom, walkRefs(r.refs, hidden, solo), commits, labelRefs(r.refs, hidden, solo));
+        if (typeof plan.full !== 'string') plan.allRefs = r.refs;
+        if (typeof plan.full === 'string') full = plan.full;
         else { applySync(plan); fingerprintSeen = r.fingerprintBefore; loadTracking(); loadStashes(); loadPrs({ minAge: 30e3 }); loadWip({ force: true }); }
       }
     } catch (e) {
@@ -2260,32 +2276,36 @@ function toggleMenu(){
   menu.innerHTML = (items || '<div class="hint">No recent repositories</div>') + '<hr><button class="menu-item" data-action="open"><span class="n">Open another repository…</span></button>';
   menu.hidden = false; $('#repoBtn').setAttribute('aria-expanded', 'true');
 }
-function onRecentClick(e){
-  const b = e.target.closest('[data-path],[data-action]'); if (!b) return;
-  if (b.dataset.action === 'open') pickRepo(); else openPath(b.dataset.path);
+function onRecentClick(e: MouseEvent){
+  const b = (e.target as Element).closest<HTMLElement>('[data-path],[data-action]'); if (!b) return;
+  if (b.dataset.action === 'open') pickRepo(); else openPath(b.dataset.path!);
 }
 
 /* ---------- browser mode: manual import ---------- */
-function openModal(){ $('#modal').hidden = false; $('#err').textContent = ''; $('#repoIn').value = S.sample ? '' : S.repo; $('#logIn').focus(); }
+function openModal(){ $('#modal').hidden = false; $('#err').textContent = ''; $<HTMLInputElement>('#repoIn').value = S.sample ? '' : S.repo; $('#logIn').focus(); }
 function closeModal(){ $('#modal').hidden = true; }
 
 /* ---------- events ---------- */
+// Clicks and keys below come from elements of the page; data-* attributes are the ones this file renders.
 body.addEventListener('click', e => {
-  const pop = e.target.closest('.ref-pop'); if (pop) { select(+pop.dataset.i, { open: true }); return; }
-  const r = e.target.closest('.row'); if (!r) return;
-  if (r === wipRow) selectWip({ open: true }); else select(+r.dataset.i, { open: true });
+  const t = e.target as Element;
+  const pop = t.closest<HTMLElement>('.ref-pop'); if (pop) { select(+pop.dataset.i!, { open: true }); return; }
+  const r = t.closest<HTMLElement>('.row'); if (!r) return;
+  if (r === wipRow) selectWip({ open: true }); else select(+r.dataset.i!, { open: true });
 });
 detail.addEventListener('click', e => {
-  const df = e.target.closest('[data-df]'); if (df) { openDiff(+df.dataset.df); return; }
-  const j = e.target.closest('[data-jump]'); if (j) { closeDiff(); select(S.idx.get(j.dataset.jump), { scroll: true, open: detail.classList.contains('open') }); return; }
-  const cp = e.target.closest('[data-copy]'); if (cp) { copyText(cp.dataset.copy, cp); return; }
-  const ou = e.target.closest('[data-open-url]'); if (ou) { invoke('open_url', { url: ou.dataset.openUrl }).catch(err => showError(String(err))); return; }
-  if (e.target.closest('.d-close')) detail.classList.remove('open');
+  const t = e.target as Element;
+  const df = t.closest<HTMLElement>('[data-df]'); if (df) { openDiff(+df.dataset.df!); return; }
+  // data-jump is only rendered for loaded commits (hashLink).
+  const j = t.closest<HTMLElement>('[data-jump]'); if (j) { closeDiff(); select(S.idx.get(j.dataset.jump!)!, { scroll: true, open: detail.classList.contains('open') }); return; }
+  const cp = t.closest<HTMLElement>('[data-copy]'); if (cp) { copyText(cp.dataset.copy!, cp); return; }
+  const ou = t.closest<HTMLElement>('[data-open-url]'); if (ou) { invoke('open_url', { url: ou.dataset.openUrl! }).catch(err => showError(String(err))); return; }
+  if (t.closest('.d-close')) detail.classList.remove('open');
 });
 $('#q').addEventListener('input', runSearch);
 $('#q').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && matches.length) { matchPtr = (matchPtr + 1) % matches.length; select(matches[matchPtr], { scroll: true }); $('#qCount').textContent = `${matchPtr + 1} of ${matches.length}`; }
-  if (e.key === 'Escape') { e.target.value = ''; runSearch(); e.target.blur(); }
+  if (e.key === 'Enter' && matches.length) { matchPtr = (matchPtr + 1) % matches.length; select(matches[matchPtr]!, { scroll: true }); $('#qCount').textContent = `${matchPtr + 1} of ${matches.length}`; }
+  if (e.key === 'Escape') { const q = e.target as HTMLInputElement; q.value = ''; runSearch(); q.blur(); }
 });
 document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
@@ -2304,13 +2324,13 @@ document.addEventListener('keydown', e => {
   }
   if (diffOpen()) {
     // The graph is covered: keys move between files instead of commits.
-    if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement.tagName) || side.contains(document.activeElement)) return;
+    if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement!.tagName) || side.contains(document.activeElement)) return;
     if (e.key === 'j' || e.key === ']') { e.preventDefault(); stepDiff(1); }
     else if (e.key === 'k' || e.key === '[') { e.preventDefault(); stepDiff(-1); }
     return;
   }
   const n = S.commits.length;
-  if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement.tagName) || side.contains(document.activeElement) || !n) return;
+  if (modalOpen || /INPUT|TEXTAREA/.test(document.activeElement!.tagName) || side.contains(document.activeElement) || !n) return;
   const open = detail.classList.contains('open');
   if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); select(Math.min(sel + 1, n - 1), { scroll: true, open }); }
   else if (e.key === 'ArrowUp' || e.key === 'k') {
@@ -2321,12 +2341,12 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'End') { e.preventDefault(); select(n - 1, { scroll: true, open }); }
   else if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
 });
-document.addEventListener('click', e => { if (!menu.hidden && !e.target.closest('.repo-wrap')) closeMenu(); });
+document.addEventListener('click', e => { if (!menu.hidden && !(e.target as Element).closest('.repo-wrap')) closeMenu(); });
 if (NATIVE) {
   // The webview's own menu (Back, Refresh, Print…) does nothing useful here. Keep it only
   // in text boxes (paste) and while text is selected (copy).
   document.addEventListener('contextmenu', e => {
-    const box = e.target.closest('input, textarea');
+    const box = (e.target as Element).closest<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
     if (box && !/^(checkbox|radio|button|submit|reset|range|color|file)$/.test(box.type)) return;
     if (String(getSelection()).trim()) return;
     e.preventDefault();
@@ -2335,22 +2355,23 @@ if (NATIVE) {
 
 /* column resize: drag a header's right edge, double-click it to reset,
    or focus it and use the arrow keys. */
-document.querySelectorAll('.head .resizer').forEach(rz => {
-  const key = rz.dataset.col;
-  const current = () => {
+document.querySelectorAll<HTMLElement>('.head .resizer').forEach(rz => {
+  const key = rz.dataset.col as ColKey;   // data-col in index.html is one of the column keys
+  const all = cols as Record<ColKey, number | null>;
+  const current = (): number => {
     if (key === 'graph') return graphColW();
-    if (key === 'msg') return cols.msg || rz.parentElement.getBoundingClientRect().width;
-    return cols[key];
+    if (key === 'msg') return cols.msg || rz.parentElement!.getBoundingClientRect().width;
+    return all[key]!;   // ref and date always have a width
   };
-  const set = w => { cols[key] = Math.round(Math.max(COLS[key].min, Math.min(COLS[key].max, w))); applyCols(); };
+  const set = (w: number) => { all[key] = Math.round(Math.max(COLS[key].min, Math.min(COLS[key].max, w))); applyCols(); };
   rz.addEventListener('pointerdown', e => {
     e.preventDefault(); rz.setPointerCapture(e.pointerId); rz.classList.add('drag');
     const startX = e.clientX, startW = current();
-    const move = ev => set(startW + ev.clientX - startX);
+    const move = (ev: PointerEvent) => set(startW + ev.clientX - startX);
     const up = () => { rz.classList.remove('drag'); rz.removeEventListener('pointermove', move); rz.removeEventListener('pointerup', up); saveCols(); };
     rz.addEventListener('pointermove', move); rz.addEventListener('pointerup', up);
   });
-  rz.addEventListener('dblclick', () => { cols[key] = COLS[key].reset(); applyCols(); saveCols(); });
+  rz.addEventListener('dblclick', () => { all[key] = COLS[key].reset(); applyCols(); saveCols(); });
   rz.addEventListener('keydown', e => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault(); set(current() + (e.key === 'ArrowRight' ? 10 : -10)); saveCols();
@@ -2388,7 +2409,7 @@ if (NATIVE) {
   window.addEventListener('focus', () => loadWip({ force: true }));   // back from the editor
   document.addEventListener('visibilitychange', poll);
 
-  const last = lsJSON('lanes.last', null);
+  const last = lsJSON<RepoInfo | null>('lanes.last', null);
   if (last && last.path) openPath(last.path, { quiet: true });
   else showEmpty();
 } else {
@@ -2397,22 +2418,23 @@ if (NATIVE) {
   $('#importBtn').hidden = false;
   $('#importBtn').addEventListener('click', openModal);
   $('#cancelBtn').addEventListener('click', closeModal);
-  $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
-  $('#copyCmd').addEventListener('click', e => copyText($('#cmd').textContent, e.currentTarget));
+  $('#modal').addEventListener('click', e => { if ((e.target as Element).id === 'modal') closeModal(); });
+  $('#copyCmd').addEventListener('click', e => copyText($('#cmd').textContent!, e.currentTarget as HTMLElement));
   $('#fileIn').addEventListener('change', async e => {
-    const f = e.target.files[0]; if (!f) return;
+    const input = e.target as HTMLInputElement;
+    const f = input.files![0]; if (!f) return;
     const buf = await f.arrayBuffer(); const b = new Uint8Array(buf);
     const enc = (b[0] === 0xFF && b[1] === 0xFE) ? 'utf-16le' : (b[0] === 0xFE && b[1] === 0xFF) ? 'utf-16be' : 'utf-8';
-    $('#logIn').value = new TextDecoder(enc).decode(buf).replace(/^\uFEFF/, '');
+    $<HTMLTextAreaElement>('#logIn').value = new TextDecoder(enc).decode(buf).replace(/^\uFEFF/, '');
     const base = f.name.replace(/\.(txt|log)$/i, '');
-    if (!$('#repoIn').value && base !== 'lanes') $('#repoIn').value = base;
-    e.target.value = '';
+    if (!$<HTMLInputElement>('#repoIn').value && base !== 'lanes') $<HTMLInputElement>('#repoIn').value = base;
+    input.value = '';
   });
   $('#loadBtn').addEventListener('click', () => {
-    const text = $('#logIn').value;
+    const text = $<HTMLTextAreaElement>('#logIn').value;
     const { commits, bad } = parseLog(text);
     if (!commits.length) { $('#err').textContent = 'No commits found. Use the exact command above, without --graph or --oneline.'; return; }
-    const repo = $('#repoIn').value.trim() || 'my-repo';
+    const repo = $<HTMLInputElement>('#repoIn').value.trim() || 'my-repo';
     if (!lsSet('lanes.log', text.length < 4e6 ? text : '')) lsDel('lanes.log');
     lsSet('lanes.repo', repo);
     closeModal();
