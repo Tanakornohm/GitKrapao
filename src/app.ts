@@ -9,6 +9,9 @@ import type { AppState, Card, Commit, Edge, Layout, RawCommit, RefGroup, Shown }
 import type { Refs } from './bindings/Refs';
 import type { RepoInfo } from './bindings/RepoInfo';
 import type { Stash } from './bindings/Stash';
+import type { Track } from './bindings/Track';
+import type { WorkFile } from './bindings/WorkFile';
+import type { WorkStatus } from './bindings/WorkStatus';
 
 (() => {
 'use strict';
@@ -1193,7 +1196,7 @@ diffPane.querySelectorAll<HTMLElement>('[data-df-ctx]').forEach(b => b.addEventL
 
 /* ---------- search ---------- */
 function runSearch(){
-  const q = $('#q').value.trim().toLowerCase();
+  const q = $<HTMLInputElement>('#q').value.trim().toLowerCase();
   matches = []; matchPtr = -1;
   if (q) S.commits.forEach((c, i) => { if (c.hay.includes(q)) matches.push(i); });
   matchSet = q ? new Set(matches) : null;
@@ -1208,10 +1211,10 @@ function runSearch(){
    one tab stop; the arrow keys move inside it. */
 const sideList = $('#sideList');
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
-let sideClosed = new Set(lsJSON('lanes.sideClosed', []));
-let sideFocus = null;        // data-key of the tree item holding the tab stop
-let sideWaiting = [];        // branch tips not loaded yet; the panel redraws once they are
-const sideBusy = new Set();  // tips jumpTo is still loading history for
+let sideClosed = new Set(lsJSON<string[]>('lanes.sideClosed', []));
+let sideFocus: string | null | undefined = null;   // data-key of the tree item holding the tab stop
+let sideWaiting: string[] = [];        // branch tips not loaded yet; the panel redraws once they are
+const sideBusy = new Set<string>();  // tips jumpTo is still loading history for
 const FOLDER_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 4v8.5h13V5.5H7.5L6 4z"/></svg>';
 const CHEVRON = '<span class="sb-chev"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg></span>';
 
@@ -1221,50 +1224,50 @@ const CHEVRON = '<span class="sb-chev"><svg width="10" height="10" viewBox="0 0 
    their labels; commits that a visible ref also reaches stay, as in
    GitKraken. The checked-out branch is never hidden. */
 const HIDDEN_KEY = 'lanes.hidden';
-const repoKey = path => path || (current ? current.path : 'browser:' + S.repo);
-function hiddenList(path){
-  const v = lsJSON(HIDDEN_KEY, {})[repoKey(path)];
-  return Array.isArray(v) ? v.filter(h => typeof h === 'string') : [];
+const repoKey = (path?: string) => path || (current ? current.path : 'browser:' + S.repo);
+// Saved lists come from localStorage: keep only string entries.
+const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((h): h is string => typeof h === 'string') : [];
+function hiddenList(path?: string){
+  return strings(lsJSON<Record<string, unknown>>(HIDDEN_KEY, {})[repoKey(path)]);
 }
-function saveHidden(list){
-  const all = lsJSON(HIDDEN_KEY, {});
+function saveHidden(list: string[]){
+  const all = lsJSON<Record<string, string[]>>(HIDDEN_KEY, {});
   if (list.length) all[repoKey()] = list; else delete all[repoKey()];
   lsSet(HIDDEN_KEY, JSON.stringify(all));
 }
-const coveredBy = (ref, list) => list.find(h => h === ref || (h.endsWith('/') && ref.startsWith(h)));
-function visibleRefs(r, list){
+const coveredBy = (ref: string, list: string[]) => list.find(h => h === ref || (h.endsWith('/') && ref.startsWith(h)));
+function visibleRefs(r: Refs, list: string[]): Refs{
   if (!list.length) return r;
   return { ...r, refs: r.refs.filter(([, n]) => n === r.headRef || n.startsWith('refs/tags/') || !coveredBy(n, list)) };
 }
-const isHiddenRef = (ref, list) => !!S.refs && ref !== S.refs.headRef && !!coveredBy(ref, list);
+const isHiddenRef = (ref: string, list: string[]) => !!S.refs && ref !== S.refs.headRef && !!coveredBy(ref, list);
 
 /* Solo: show only the chosen branches (same entry format, saved in
    lanes.solo). It wins over hidden. The walk then has no tags and no HEAD,
    so sync tips must come from the soloed refs alone: a tip outside the walk
    used as ^exclude would drop commits a soloed branch later merges in. */
 const SOLO_KEY = 'lanes.solo';
-function soloList(path){
-  const v = lsJSON(SOLO_KEY, {})[repoKey(path)];
-  return Array.isArray(v) ? v.filter(h => typeof h === 'string') : [];
+function soloList(path?: string){
+  return strings(lsJSON<Record<string, unknown>>(SOLO_KEY, {})[repoKey(path)]);
 }
-function saveSolo(list, path){
-  const all = lsJSON(SOLO_KEY, {});
+function saveSolo(list: string[], path?: string){
+  const all = lsJSON<Record<string, string[]>>(SOLO_KEY, {});
   if (list.length) all[repoKey(path)] = list; else delete all[repoKey(path)];
   lsSet(SOLO_KEY, JSON.stringify(all));
 }
 /* The refs the history walk starts from: their tips drive sync. */
-function walkRefs(r, hidden, solo){
+function walkRefs(r: Refs, hidden: string[], solo: string[]): Refs{
   if (!solo.length) return visibleRefs(r, hidden);
   const head = r.headRef && coveredBy(r.headRef, solo);
   return { refs: r.refs.filter(([, n]) => !n.startsWith('refs/tags/') && coveredBy(n, solo)),
            headRef: head ? r.headRef : null, headSha: head ? r.headSha : null };
 }
 /* The refs shown as labels: the walk, plus tags on whatever it shows. */
-function labelRefs(r, hidden, solo){
+function labelRefs(r: Refs, hidden: string[], solo: string[]): Refs{
   const w = walkRefs(r, hidden, solo);
   return solo.length ? { ...w, refs: w.refs.concat(r.refs.filter(([, n]) => n.startsWith('refs/tags/'))) } : w;
 }
-const shownRefs = () => S.refs ? walkRefs(S.refs, hiddenList(), soloList()) : { refs: [], headRef: null, headSha: null };
+const shownRefs = (): Refs => S.refs ? walkRefs(S.refs, hiddenList(), soloList()) : { refs: [], headRef: null, headSha: null };
 
 let hiddenGen = 0;           // bumped on every hide/solo change; a load or sync that saw an older list reloads
 function reloadForWalk(){
@@ -1275,45 +1278,49 @@ function reloadForWalk(){
 }
 // Toggles ref in a hide/solo list. Covered by a folder entry: drops that
 // entry (the whole folder comes back). Adding a folder drops entries inside it.
-function toggleIn(list, ref){
+function toggleIn(list: string[], ref: string){
   const cover = coveredBy(ref, list);
   if (cover) return list.filter(h => h !== cover);
   return [...list.filter(h => !(ref.endsWith('/') && h.startsWith(ref))), ref];
 }
-function toggleHidden(ref){ saveHidden(toggleIn(hiddenList(), ref)); reloadForWalk(); }
-function toggleSolo(ref){ saveSolo(toggleIn(soloList(), ref)); reloadForWalk(); }
+function toggleHidden(ref: string){ saveHidden(toggleIn(hiddenList(), ref)); reloadForWalk(); }
+function toggleSolo(ref: string){ saveSolo(toggleIn(soloList(), ref)); reloadForWalk(); }
 function showAllBranches(){ saveHidden([]); reloadForWalk(); }
 function exitSolo(){ saveSolo([]); reloadForWalk(); }
 
 /* Browser mode: hiding filters the pasted log down to what visible refs reach. */
-let browserData = null;
-function showBrowser({ raws, repo, sample, note = '', keep = false }){
+interface BrowserData { raws: Commit[]; repo: string; sample: boolean; note: string }
+let browserData: BrowserData | null = null;
+function showBrowser({ raws, repo, sample, note = '', keep = false }: Omit<BrowserData, 'note'> & { note?: string; keep?: boolean }){
   browserData = { raws, repo, sample, note };
   const remotes = guessRemotes(raws), refs = refsFromDec(raws, remotes);
   const hidden = hiddenList('browser:' + repo), solo = soloList('browser:' + repo);
   let list = raws;
   if (hidden.length || solo.length) {
-    const by = new Map(raws.map(c => [c.hash, c])), keepSet = new Set(), stack = [...tipsOf(walkRefs(refs, hidden, solo))];
+    const by = new Map(raws.map(c => [c.hash, c])), keepSet = new Set<string>(), stack = [...tipsOf(walkRefs(refs, hidden, solo))];
     while (stack.length) {
-      const h = stack.pop();
+      const h = stack.pop()!;
       if (keepSet.has(h) || !by.has(h)) continue;
-      keepSet.add(h); by.get(h).parents.forEach(p => stack.push(p));
+      keepSet.add(h); by.get(h)!.parents.forEach(p => stack.push(p));
     }
     list = raws.filter(c => keepSet.has(c.hash));
   }
   setData(list, repo, sample, { note, refs, remotes: [...remotes], hidden, solo, keep });
 }
 
-function branchList(){
-  const local = [], remote = new Map(); let detached = null;
-  const addRemote = (r, b) => { if (!remote.has(r)) remote.set(r, []); remote.get(r).push(b); };
+interface Branch { name: string; ref: string; sha: string; head?: boolean }
+type BranchList = { local: Branch[]; remote: Map<string, Branch[]>; detached: string | null };
+function branchList(): BranchList{
+  const local: Branch[] = [], remote = new Map<string, Branch[]>(); let detached: string | null = null;
+  const addRemote = (r: string, b: Branch) => { if (!remote.has(r)) remote.set(r, []); remote.get(r)!.push(b); };
   if (S.refs) {
+    const refs = S.refs;
     // Remote names can contain "/", so match the longest known one first.
-    const names = [...S.remotes].sort((a, b) => b.length - a.length);
-    S.refs.refs.forEach(([sha, ref]) => {
-      if (ref.startsWith('refs/heads/')) local.push({ name: ref.slice(11), ref, sha, head: ref === S.refs.headRef });
+    const names = [...S.remotes!].sort((a, b) => b.length - a.length);
+    refs.refs.forEach(([sha, ref]) => {
+      if (ref.startsWith('refs/heads/')) local.push({ name: ref.slice(11), ref, sha, head: ref === refs.headRef });
       else if (ref.startsWith('refs/remotes/')) {
-        const rest = ref.slice(13), r = names.find(n => rest.startsWith(n + '/')) || rest.split('/')[0];
+        const rest = ref.slice(13), r = names.find(n => rest.startsWith(n + '/')) || rest.split('/')[0]!;
         const name = rest.slice(r.length + 1);
         if (name && name !== 'HEAD') addRemote(r, { name, ref, sha });
       }
@@ -1325,22 +1332,22 @@ function branchList(){
 
 /* Browser mode has no upstream config: pair each local branch with the
    same name on origin (or any remote) and count over the loaded graph. */
-function guessTracking(list){
-  const out = new Map();
+function guessTracking(list: BranchList){
+  const out = new Map<string, Track>();
   if (S.commits.length > 50000) return out;
-  const reach = sha => {
-    const seen = new Set(), stack = [sha];
+  const reach = (sha: string) => {
+    const seen = new Set<string>(), stack = [sha];
     while (stack.length) {
-      const h = stack.pop();
+      const h = stack.pop()!;
       if (seen.has(h) || !S.idx.has(h)) continue;
-      seen.add(h); S.commits[S.idx.get(h)].parents.forEach(p => stack.push(p));
+      seen.add(h); S.commits[S.idx.get(h)!]!.parents.forEach(p => stack.push(p));
     }
     return seen;
   };
-  const remotes = [...list.remote.keys()].sort((a, b) => (b === 'origin') - (a === 'origin'));
+  const remotes = [...list.remote.keys()].sort((a, b) => +(b === 'origin') - +(a === 'origin'));
   list.local.forEach(b => {
-    let up = null;
-    for (const r of remotes) { up = list.remote.get(r).find(x => x.name === b.name); if (up) break; }
+    let up: Branch | null | undefined = null;
+    for (const r of remotes) { up = list.remote.get(r)!.find(x => x.name === b.name); if (up) break; }
     if (!up || !S.idx.has(b.sha) || !S.idx.has(up.sha)) return;   // e.g. one of them is hidden
     const A = reach(b.sha), B = reach(up.sha);
     let ahead = 0, behind = 0;
@@ -1363,11 +1370,11 @@ async function loadTracking(){
   } catch (e) { /* the counts are extras; the panel works without them */ }
 }
 
-let sideHidden = [], sideSolo = [];   // hide/solo lists for the render in progress (read once per render)
+let sideHidden: string[] = [], sideSolo: string[] = [];   // hide/solo lists for the render in progress (read once per render)
 
 /* hideRef: the ref or "folder/" prefix the eye toggles; none for sections. */
-function sideNode(key, level, label, count, children, cls, hideRef){
-  const open = !!$('#bq').value.trim() || !sideClosed.has(key);
+function sideNode(key: string, level: number, label: string, count: number | null, children: string, cls: string, hideRef?: string){
+  const open = !!$<HTMLInputElement>('#bq').value.trim() || !sideClosed.has(key);
   const st = hideRef ? refState(hideRef, false) : 'shown', hidden = st === 'hidden' || st === 'out';
   return `<div role="treeitem" class="sb-node ${cls}${hidden ? ' is-hidden' : ''}${st === 'solo' ? ' is-solo' : ''}" aria-level="${level}" aria-expanded="${open}" data-key="${esc(key)}"${hideRef ? ` data-ref="${esc(hideRef)}"` : ''} tabindex="-1">`
     + `<div class="sb-row" style="--lvl:${level}">${CHEVRON}${label}${count == null ? '' : `<span class="sb-count">${count.toLocaleString('en')}</span>`}`
@@ -1377,31 +1384,33 @@ function sideNode(key, level, label, count, children, cls, hideRef){
 
 /* solo: in the solo set; out: solo is on and this is not in it;
    hidden / shown otherwise. The checked-out branch is never hidden. */
-function refState(ref, isHead){
+type RefState = 'solo' | 'out' | 'hidden' | 'shown';
+function refState(ref: string, isHead: boolean | undefined): RefState{
   if (sideSolo.length) return coveredBy(ref, sideSolo) ? 'solo' : 'out';
   return !isHead && coveredBy(ref, sideHidden) ? 'hidden' : 'shown';
 }
-function rowButtons(ref, st, canHide = true){
+function rowButtons(ref: string, st: RefState, canHide = true){
   const on = st === 'solo';
   const solo = `<span class="sb-solo${on ? ' on' : ''}" data-solo="${esc(ref)}" title="${on ? 'Leave solo (S)' : 'Solo: show only this (S)'}" aria-hidden="true">${ICON.solo}</span>`;
   return solo + (!sideSolo.length && canHide ? eyeBtn(ref, st === 'hidden') : '');
 }
-const refLabel = r => r.replace(/^refs\/(heads|remotes)\//, '');
-function eyeBtn(ref, hidden){
+const refLabel = (r: string) => r.replace(/^refs\/(heads|remotes)\//, '');
+function eyeBtn(ref: string, hidden: boolean){
   const cover = hidden && coveredBy(ref, sideHidden);
   let title = 'Hide from the graph (H)';
-  if (hidden) title = cover === ref ? 'Show in the graph (H)' : `Hidden with ${refLabel(cover)}. Click to show it again (H)`;
+  // hidden comes from refState, so some entry covers ref.
+  if (hidden) title = cover === ref ? 'Show in the graph (H)' : `Hidden with ${refLabel(cover as string)}. Click to show it again (H)`;
   return `<span class="sb-eye${hidden ? ' on' : ''}" data-hide="${esc(ref)}" title="${esc(title)}" aria-hidden="true">${hidden ? ICON.eyeOff : ICON.eye}</span>`;
 }
 
-function sideLeaf(b, label, level, track){
+function sideLeaf(b: Branch, label: string, level: number, track: Map<string, Track>){
   const i = S.idx.get(b.sha), loaded = i !== undefined;
   const canHide = !b.head && b.ref !== 'HEAD', canSolo = b.ref !== 'HEAD';
   const st = canSolo ? refState(b.ref, b.head) : (sideSolo.length ? 'out' : 'shown'), hidden = st === 'hidden' || st === 'out';
   const shown = loaded && !hidden;
   if (!loaded && !hidden) sideWaiting.push(b.sha);
   const mark = b.head ? `<span class="sb-head">${ICON.check}</span>`
-    : `<span class="sb-dot${shown ? '' : ' off'}"${shown ? ` style="--c:${laneCol(S.commits[i].color)}"` : ''}></span>`;
+    : `<span class="sb-dot${shown ? '' : ' off'}"${shown ? ` style="--c:${laneCol(S.commits[i!]!.color)}"` : ''}></span>`;
   const t = track.get(b.ref.startsWith('refs/heads/') ? b.name : '');
   const up = t ? t.upstream.replace(/^refs\/(remotes|heads)\//, '') : '';
   let badge = '', tip = b.ref;
@@ -1420,19 +1429,21 @@ function sideLeaf(b, label, level, track){
 }
 
 /* Folders and branches sorted together by name, like a file tree. */
-function sideTree(items, level, key, track, prefix){
-  const root = { dirs: new Map(), leaves: [], n: 0 };
+interface TreeNode { dirs: Map<string, TreeNode>; leaves: Branch[]; n: number }
+type TreeEntry = { name: string; d: TreeNode; b?: undefined } | { name: string; b: Branch; d?: undefined };
+function sideTree(items: Branch[], level: number, key: string, track: Map<string, Track>, prefix: string){
+  const root: TreeNode = { dirs: new Map(), leaves: [], n: 0 };
   items.forEach(b => {
     let n = root; n.n++;
     b.name.split('/').slice(0, -1).forEach(p => {
       if (!n.dirs.has(p)) n.dirs.set(p, { dirs: new Map(), leaves: [], n: 0 });
-      n = n.dirs.get(p); n.n++;
+      n = n.dirs.get(p)!; n.n++;
     });
     n.leaves.push(b);
   });
-  const walk = (n, level, key, dir) => [
-    ...[...n.dirs].map(([name, d]) => ({ name, d })),
-    ...n.leaves.map(b => ({ name: b.name.slice(b.name.lastIndexOf('/') + 1), b })),
+  const walk = (n: TreeNode, level: number, key: string, dir: string): string => [
+    ...[...n.dirs].map(([name, d]): TreeEntry => ({ name, d })),
+    ...n.leaves.map((b): TreeEntry => ({ name: b.name.slice(b.name.lastIndexOf('/') + 1), b })),
   ].sort((x, y) => collator.compare(x.name, y.name)).map(e => e.b
     ? sideLeaf(e.b, e.name, level, track)
     : sideNode(`${key}/${e.name}`, level, `<span class="sb-ic">${FOLDER_ICON}</span><span class="sb-name">${esc(e.name)}</span>`, e.d.n,
@@ -1445,10 +1456,11 @@ function renderSide(){
   sideHidden = hiddenList(); sideSolo = soloList();
   const list = branchList();
   const track = NATIVE ? (S.track || new Map()) : guessTracking(list);
-  const q = $('#bq').value.trim().toLowerCase();
-  const hit = b => !q || b.name.toLowerCase().includes(q);
-  const focused = sideList.contains(document.activeElement) ? document.activeElement.dataset.key : null;
-  const empty = (level, text) => `<div class="sb-empty" role="none" style="--lvl:${level}">${text}</div>`;
+  const q = $<HTMLInputElement>('#bq').value.trim().toLowerCase();
+  const hit = (b: Branch) => !q || b.name.toLowerCase().includes(q);
+  // Tree items are HTML elements, so a focused one has a dataset.
+  const focused = sideList.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : null;
+  const empty = (level: number, text: string) => `<div class="sb-empty" role="none" style="--lvl:${level}">${text}</div>`;
   sideWaiting = [];
 
   const local = list.local.filter(hit);
@@ -1458,8 +1470,8 @@ function renderSide(){
   const localCount = local.length + (list.detached ? 1 : 0);
 
   let remoteHtml = '', remoteCount = 0;
-  [...list.remote.keys()].sort((a, b) => (b === 'origin') - (a === 'origin') || collator.compare(a, b)).forEach(r => {
-    const items = list.remote.get(r).filter(hit);
+  [...list.remote.keys()].sort((a, b) => +(b === 'origin') - +(a === 'origin') || collator.compare(a, b)).forEach(r => {
+    const items = list.remote.get(r)!.filter(hit);
     if (q && !items.length) return;
     remoteCount += items.length;
     remoteHtml += sideNode(`R:${r}`, 2, `<span class="sb-ic">${ICON.cloud}</span><span class="sb-name">${esc(r)}</span>`, items.length,
@@ -1485,7 +1497,7 @@ function renderSide(){
     : nn + (n === 1 ? ' branch is' : ' branches are') + ' hidden from the graph';
   $('#showAllBtn').textContent = sideSolo.length ? 'Exit solo' : 'Show all';
 
-  const items = [...sideList.querySelectorAll('[role="treeitem"]')];
+  const items = [...sideList.querySelectorAll<HTMLElement>('[role="treeitem"]')];
   const keep = items.find(el => el.dataset.key === (focused || sideFocus)) || items[0];
   if (keep) { keep.tabIndex = 0; sideFocus = keep.dataset.key; if (focused) keep.focus({ preventScroll: true }); }
 }
@@ -1502,11 +1514,11 @@ function markSide(){
 
 /* Selects a branch tip; on desktop keeps loading pages until it is in view. */
 let jumpSeq = 0;
-async function jumpTo(sha, { detail: show = true } = {}){
+async function jumpTo(sha: string, { detail: show = true }: { detail?: boolean } = {}){
   const seq = ++jumpSeq;
   if (!S.idx.has(sha) && NATIVE && S.more) {
     // By SHA, not element: pages arriving meanwhile redraw the panel.
-    const mark = on => { sideBusy[on ? 'add' : 'delete'](sha); sideList.querySelectorAll(`.sb-leaf[data-sha="${CSS.escape(sha)}"]`).forEach(x => x.classList.toggle('busy', on)); };
+    const mark = (on: boolean) => { sideBusy[on ? 'add' : 'delete'](sha); sideList.querySelectorAll(`.sb-leaf[data-sha="${CSS.escape(sha)}"]`).forEach(x => x.classList.toggle('busy', on)); };
     mark(true);
     let stalls = 0;
     while (!S.idx.has(sha) && S.more && seq === jumpSeq) {
@@ -1532,7 +1544,7 @@ async function jumpTo(sha, { detail: show = true } = {}){
    tree edits do not touch .git, so the ref fingerprint cannot see them;
    work_status is polled on its own, slower when status is slow. */
 const WIP_EVERY = 4000;
-let wip = { path: null, files: [], total: 0, sig: '' }, wipSeq = 0, wipNext = 0, wipBusy = false;
+let wip: { path: string | null; files: WorkFile[]; total: number; sig: string } = { path: null, files: [], total: 0, sig: '' }, wipSeq = 0, wipNext = 0, wipBusy = false;
 let wipSel = false;          // the WIP row is selected (sel is then -1)
 let rowOff = 0;              // px above row 0: ROW_H while the WIP row shows
 const wipRow = document.createElement('div');
@@ -1543,10 +1555,10 @@ const wipOn = () => NATIVE && !!current && wip.path === current.path && wip.tota
 function wipHead(): number{
   const h = S.refs && S.refs.headSha && S.idx.get(S.refs.headSha);
   // headSha is null or a full SHA (never ''), so h is a row index here.
-  return h === undefined || h === null || h === false ? -1 : h as number;
+  return h === undefined || h === null ? -1 : h as number;
 }
 
-async function loadWip({ force = false } = {}){
+async function loadWip({ force = false }: { force?: boolean } = {}){
   if (!NATIVE || !current || document.hidden || wipBusy) return;
   if (!force && Date.now() < wipNext) return;
   wipBusy = true;
@@ -1562,25 +1574,25 @@ async function loadWip({ force = false } = {}){
   }
 }
 
-function wipKind(f){
+function wipKind(f: WorkFile){
   if (f.conflict) return 'conflict';
   if (f.staged === 'A' || f.unstaged === '?') return 'add';
   if (f.staged === 'D' || f.unstaged === 'D') return 'del';
   return 'mod';
 }
-function applyWip(path, r){
+function applyWip(path: string, r: WorkStatus){
   const sig = r.total + '|' + r.files.map(f => `${f.staged}${f.unstaged}${f.conflict ? '!' : ''} ${f.oldPath || ''}>${f.path}`).join('|');
   if (wip.path === path && wip.sig === sig) { refreshWipDiff(); return; }
   wip = { path, files: r.files, total: r.total, sig };
   const n = { mod: 0, add: 0, del: 0, conflict: 0 };
   r.files.forEach(f => n[wipKind(f)]++);
-  const chip = (k, icon, label) => n[k] ? `<span class="wip-n ${k}" title="${n[k]} ${label}">${icon}${n[k]}</span>` : '';
+  const chip = (k: keyof typeof n, icon: string, label: string) => n[k] ? `<span class="wip-n ${k}" title="${n[k]} ${label}">${icon}${n[k]}</span>` : '';
   wipRow.innerHTML = '<div class="col-ref"></div><div class="col-graph"></div>'
     + `<div class="col-msg"><span class="wip-label">// WIP</span>${chip('mod', ICON.pencil, 'modified')}${chip('add', '+', 'added')}${chip('del', '−', 'deleted')}${chip('conflict', '!', 'conflicted')}</div><div class="col-date"></div>`;
   wipRow.title = r.total === 1 ? '1 file changed, not committed' : r.total.toLocaleString('en') + ' files changed, not committed';
   placeRows();
   if (detailFor && detailFor.card === 'wip') {
-    if (wipOn()) { wipCard(); if (diffOpen() && dfList[dfAt] && dfList[dfAt].kind === 'wip') { syncDiffList(); diffNav(); refreshWipDiff(); } }
+    if (wipOn()) { wipCard(); if (diffOpen() && dfList[dfAt]?.kind === 'wip') { syncDiffList(); diffNav(); refreshWipDiff(); } }
     else { const h = wipHead(); select(h >= 0 ? h : 0); }   // everything was committed or reverted
   }
   scheduleDraw();
@@ -1603,9 +1615,9 @@ function placeRows(){
   if (!on && wipSel) { wipSel = false; wipRow.classList.remove('sel'); }
 }
 
-function selectWip({ open = false } = {}){
+function selectWip({ open = false }: { open?: boolean } = {}){
   if (!wipOn()) return;
-  if (pool.has(sel)) pool.get(sel).classList.remove('sel');
+  pool.get(sel)?.classList.remove('sel');
   sel = -1; wipSel = true;
   wipRow.classList.add('sel');
   wipCard();
@@ -1614,7 +1626,7 @@ function selectWip({ open = false } = {}){
   scheduleDraw();
 }
 
-function wipFile(f, side, i){
+function wipFile(f: WorkFile, side: 's' | 'u', i: number){
   const st = f.conflict ? '!' : side === 's' ? f.staged : f.unstaged;
   const cls = st === '?' ? 'A' : st === '!' ? 'D' : st;
   const slash = f.path.lastIndexOf('/');
@@ -1631,13 +1643,13 @@ function wipCard(){
   const conflicts = files.filter(f => f.conflict).length;
   // One list for diff navigation: unstaged first, then staged, as shown.
   panelFiles = [];
-  const entry = (f, side) => {
-    const kind = f.conflict ? 'conflict' : side === 's' ? 'staged' : f.unstaged === '?' ? 'untracked' : 'unstaged';
+  const entry = (f: WorkFile, side: 's' | 'u') => {
+    const kind: WipSide = f.conflict ? 'conflict' : side === 's' ? 'staged' : f.unstaged === '?' ? 'untracked' : 'unstaged';
     const status = f.conflict ? '!' : side === 's' ? f.staged : f.unstaged === '?' ? 'A' : f.unstaged;
     panelFiles.push({ kind: 'wip', side: kind, path: f.path, oldPath: side === 's' ? f.oldPath : null, status });
     return panelFiles.length - 1;
   };
-  const part = (title, list, side) => `<div class="d-files"><div class="d-files-head"><span>${title} (${list.length.toLocaleString('en')})</span></div>`
+  const part = (title: string, list: WorkFile[], side: 's' | 'u') => `<div class="d-files"><div class="d-files-head"><span>${title} (${list.length.toLocaleString('en')})</span></div>`
     + (list.length ? `<ul class="d-file-list">${list.map(f => wipFile(f, side, entry(f, side))).join('')}</ul>` : '<p class="muted">None</p>') + '</div>';
   detail.innerHTML =
     '<div class="d-top"><span class="k">Work in progress</span><button class="btn icon-btn sm d-close" aria-label="Close details">✕</button></div>'
