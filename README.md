@@ -6,6 +6,11 @@ A GitKraken-style Git history viewer for the desktop. It reads repositories on y
 
 Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no framework; esbuild bundles the UI into one file.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/graph-dark.png">
+  <img alt="GitKrapao showing the commit graph of a sample repository: branch labels, colored lanes with merges, the branch panel on the left and commit details on the right" src="docs/screenshots/graph-light.png">
+</picture>
+
 ## Features
 
 - **History graph:** each branch gets its own lane and color, merges are drawn, and branches and tags are labeled. Pages load on demand and only the visible part is drawn, so large repositories stay smooth.
@@ -22,10 +27,10 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
 - **Search:** by message, author, SHA or branch name.
 - **Other:** light and dark themes, resizable columns, and correct Thai text rendering.
 
-## Installing (for people who received the installer)
+## Installing
 
 1. Install **Git for Windows** so the `git` command works. Running `git --version` in a terminal should print a version.
-2. Run `GitKrapao_x.y.z_x64-setup.exe` and click through to the end.
+2. Download `GitKrapao_x.y.z_x64-setup.exe` from the [latest release](https://github.com/korrawichT/GitKrapao/releases/latest), run it and click through to the end. It installs for the current user only, so it needs no admin rights; a newer installer updates the app in place and keeps your settings.
    - If Windows shows "Windows protected your PC", click **More info → Run anyway**. The installer is not code-signed yet.
 3. Start the app, click **Open repo** and pick any folder inside a repository.
 
