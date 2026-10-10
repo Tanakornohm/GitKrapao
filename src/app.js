@@ -1,3 +1,5 @@
+import { Syntax } from './highlight.js';
+
 (() => {
 'use strict';
 const ROW_H = 38, LANE_W = 30, PAD = 16, R = 11, DOT = 5.5;   // ROW_H = --rowh in app.css
@@ -2303,6 +2305,8 @@ wrap.addEventListener('scroll', () => { closeRefPop(); scheduleDraw(); }, { pass
 new ResizeObserver(scheduleDraw).observe(wrap);
 
 /* ---------- boot ---------- */
+// tests/ui reads state through this; real builds have __TEST__ = false and drop it.
+if (__TEST__) window.__lanes = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn };
 if (NATIVE) {
   $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;

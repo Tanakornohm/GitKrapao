@@ -6,7 +6,7 @@
    side of a diff needs its own lexer. All regexes are sticky or anchored
    with no nested quantifiers, and very long lines are skipped, because file
    contents are untrusted input. */
-const Syntax = (() => {
+export const Syntax = (() => {
   const MAX_LINE = 2000;
   const CLASSES = new Set(['cm', 'st', 'kw', 'lt', 'nu', 'ty', 'fn', 'at', 'pr', 'tg', 'va', 'hd']);
   const W = s => new Set(s.split(/\s+/).filter(Boolean));

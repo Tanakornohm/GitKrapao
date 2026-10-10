@@ -4,6 +4,7 @@ node_modules/
 # Rust / Tauri build output (several GB) and generated files
 src-tauri/target/
 src-tauri/gen/
+dist/
 
 # Local test data and backups
 .mock/
