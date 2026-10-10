@@ -830,14 +830,15 @@ function requestDetail(c: DetailSource){
       if (detailCache.size > DETAIL_CACHE) detailCache.delete(detailCache.keys().next().value!);
       if (seq === detailSeq) fillDetail(c, d);
     } catch (e) {
-      const box = $('#dFiles');
+      // #dFiles is part of the card's HTML, so it is gone once another card replaced it.
+      const box = document.querySelector<HTMLElement>('#dFiles');
       if (seq === detailSeq && box) box.innerHTML = `<p class="err">Could not load changes: ${esc(String(e))}</p>`;
     }
   }, 100);
 }
 function fillDetail(c: DetailSource, d: CommitDetail){
-  const body = $('#dBody'), box = $('#dFiles');
-  if (!box || detailFor !== c) return;
+  const body = document.querySelector<HTMLElement>('#dBody'), box = document.querySelector<HTMLElement>('#dFiles');
+  if (!body || !box || detailFor !== c) return;
   // %B starts with the subject paragraph, which the heading already shows.
   const cut = d.body.search(/\n\s*\n/);
   const rest = cut < 0 ? '' : d.body.slice(cut).trim();
@@ -2067,7 +2068,7 @@ window.addEventListener('resize', () => closeCtx(false));
 const SIDE = { min: 160, max: 520, def: 200 };
 const appEl = $('.app'), side = $('#side'), sideRz = $('.side-resizer');
 const narrowView = () => matchMedia('(max-width: 900px)').matches;
-let sideW = +lsGet('lanes.sidew')!;   // NaN when unset, caught by the range check below
+let sideW = Number(lsGet('lanes.sidew'));   // 0 when unset, NaN when not a number: both fail the range check below
 if (!(sideW >= SIDE.min && sideW <= SIDE.max)) sideW = SIDE.def;
 // On a small screen the panel floats over the graph, so it starts closed.
 let sideShown = !narrowView() && lsGet('lanes.side') !== '0';
