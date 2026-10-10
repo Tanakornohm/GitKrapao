@@ -9,7 +9,8 @@
     "mock": "node scripts/mock-repo.mjs",
     "web:build": "node scripts/web.mjs",
     "web:watch": "node scripts/web.mjs --watch",
-    "test:ui": "node tests/ui/run.mjs"
+    "test:ui": "node tests/ui/run.mjs",
+    "typecheck": "tsc --noEmit -p ."
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

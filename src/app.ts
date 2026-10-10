@@ -1,4 +1,4 @@
-import { Syntax } from './highlight.js';
+import { Syntax } from './highlight';
 
 (() => {
 'use strict';
