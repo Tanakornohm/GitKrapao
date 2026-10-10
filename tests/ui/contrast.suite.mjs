@@ -9,7 +9,7 @@ const cr = (a, b) => { const x = L(a), y = L(b); return (Math.max(x, y) + 0.05) 
 const hex = s => '#' + s.match(/\\d+/g).slice(0, 3).map(v => (+v).toString(16).padStart(2, '0')).join('');
 
 run(async () => {
-  const T = window.__lanes;
+  const T = window.__gitkrapao;
   for (const h of T.PALETTE.concat(['#8a93a1', '#6e7786', '#ffffff', '#000000', '#808080'])) {
     const t = T.textOn(h), w = cr('#ffffff', h), d = cr('#15181d', h);
     ok(Math.abs(cr(t, h) - Math.max(w, d)) < 1e-9, 'textOn picks the more readable text on ' + h, t + ' white ' + w.toFixed(2) + ' dark ' + d.toFixed(2));

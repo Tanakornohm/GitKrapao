@@ -5,5 +5,5 @@ interface Window {
   /** Present in the desktop app (withGlobalTauri); absent in browser mode. */
   __TAURI__?: { core: { invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> } };
   /** tests/ui only (see the boot section of app.ts). */
-  __lanes?: unknown;
+  __gitkrapao?: unknown;
 }

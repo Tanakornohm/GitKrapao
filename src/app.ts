@@ -2395,7 +2395,7 @@ new ResizeObserver(scheduleDraw).observe(wrap);
 
 /* ---------- boot ---------- */
 // tests/ui reads state through this; real builds have __TEST__ = false and drop it.
-if (__TEST__) window.__lanes = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn };
+if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { return PALETTE; }, textOn };
 if (NATIVE) {
   $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;
@@ -2428,7 +2428,7 @@ if (NATIVE) {
     const enc = (b[0] === 0xFF && b[1] === 0xFE) ? 'utf-16le' : (b[0] === 0xFE && b[1] === 0xFF) ? 'utf-16be' : 'utf-8';
     $<HTMLTextAreaElement>('#logIn').value = new TextDecoder(enc).decode(buf).replace(/^\uFEFF/, '');
     const base = f.name.replace(/\.(txt|log)$/i, '');
-    if (!$<HTMLInputElement>('#repoIn').value && base !== 'lanes') $<HTMLInputElement>('#repoIn').value = base;
+    if (!$<HTMLInputElement>('#repoIn').value && base !== 'gitkrapao') $<HTMLInputElement>('#repoIn').value = base;
     input.value = '';
   });
   $('#loadBtn').addEventListener('click', () => {

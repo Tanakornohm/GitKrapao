@@ -8,7 +8,7 @@ const mock = readFileSync(new URL('mock-log.txt', fx), 'utf8');
 const base = new URL('layout-baseline.json', fx);
 export const setup = () => `<script>window.__MOCK_LOG = ${JSON.stringify(mock)}; window.__BASELINE = ${existsSync(base) ? readFileSync(base, 'utf8') : 'null'};</script>`;
 export const probe = `run(async () => {
-  const snap = () => { const S = window.__lanes.S; return {
+  const snap = () => { const S = window.__gitkrapao.S; return {
     rows: S.commits.map(c => [c.hash, c.lane, c.color]),
     edges: S.edges.map(e => [e.from, e.fromLane, e.lane, e.to, e.toLane, e.color]) }; };
   const out = {};
@@ -26,7 +26,7 @@ export const probe = `run(async () => {
   } else ok(false, 'baseline exists (run with --write-baseline once)');
   const one = 'a'.repeat(40) + '|~||~|Ann|~|ann@example.com|~|1760000000|~|HEAD -> main|~|only commit';
   await importLog('one', one);
-  ok(window.__lanes.S.commits.length === 1 && document.querySelectorAll('#body .row[data-i]').length === 1, 'one-commit log renders one row');
+  ok(window.__gitkrapao.S.commits.length === 1 && document.querySelectorAll('#body .row[data-i]').length === 1, 'one-commit log renders one row');
   await importLog('bad', 'not a git log line');
   ok(!document.querySelector('#modal').hidden || /line/i.test(document.querySelector('#err').textContent), 'invalid log reports an error instead of crashing', document.querySelector('#err').textContent);
 });`;
