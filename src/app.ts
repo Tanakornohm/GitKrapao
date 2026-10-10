@@ -1,5 +1,7 @@
 import { Syntax } from './highlight';
 import { invoke, NATIVE } from './ipc';
+import type { AppState, Commit, Edge, Layout, RawCommit, RefGroup } from './types';
+import type { Refs } from './bindings/Refs';
 
 (() => {
 'use strict';
@@ -12,35 +14,38 @@ const NODE_FONT = "600 9px system-ui,-apple-system,'Segoe UI','Noto Sans Thai','
 // Lane colors; each theme sets its own in the CSS token --lanes (readTheme).
 // The light theme uses darker shades so lines stand out from a white page.
 let PALETTE = ['#17abd4','#3f7cf6','#a454f0','#e341c3','#ff4d6a','#ff8c32','#f2c230','#62cc4a','#25cfa4'];
-const laneCol = i => PALETTE[i % PALETTE.length];
-const lx = l => PAD + R + l * LANE_W;
-const ry = r => r * ROW_H + ROW_H / 2;
-const $ = s => document.querySelector(s);
-const esc = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
-const lsDel = k => { try { localStorage.removeItem(k); } catch (e) {} };
-const lsJSON = (k, d) => { try { return JSON.parse(lsGet(k)) ?? d; } catch (e) { return d; } };
+const laneCol = (i: number) => PALETTE[i % PALETTE.length]!;
+const lx = (l: number) => PAD + R + l * LANE_W;
+const ry = (r: number) => r * ROW_H + ROW_H / 2;
+// Only used for elements that are in index.html.
+const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
+const ESC: Record<string, string> = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const esc = (s: unknown) => String(s).replace(/[&<>"']/g, ch => ESC[ch]!);
+const lsGet = (k: string) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
+const lsDel = (k: string) => { try { localStorage.removeItem(k); } catch (e) {} };
+// JSON.parse(null) is null, so a missing key falls back to d like a broken value does.
+const lsJSON = <T>(k: string, d: T): T => { try { return JSON.parse(lsGet(k)!) ?? d; } catch (e) { return d; } };
 
 
-const luminance = hex => {   // WCAG relative luminance of #rrggbb
-  const n = parseInt(hex.slice(1), 16), ch = v => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+const luminance = (hex: string) => {   // WCAG relative luminance of #rrggbb
+  const n = parseInt(hex.slice(1), 16), ch = (v: number) => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   return 0.2126 * ch((n >> 16) & 255) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255);
 };
 // Dark or white text, whichever contrasts more with the fill.
-function textOn(hex){
+function textOn(hex: string){
   const l = luminance(hex) + 0.05;
   return l / (luminance('#15181d') + 0.05) >= 1.05 / l ? '#15181d' : '#ffffff';
 }
-function initials(name){
+function initials(name: string){
   const p = String(name || '').trim().split(/\s+/).filter(Boolean);
   if (!p.length) return '?';
-  const a = [...p[0]];
-  if (p.length === 1) return (a[0] + (a[1] || '')).toUpperCase();
-  return (a[0] + [...p[p.length-1]][0]).toUpperCase();
+  const a = [...p[0]!];
+  if (p.length === 1) return (a[0]! + (a[1] || '')).toUpperCase();
+  return (a[0]! + [...p[p.length-1]!][0]).toUpperCase();
 }
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
-function rel(t){
+function rel(t: number){
   const d = t - Date.now()/1000, a = Math.abs(d);
   if (a < 60) return 'just now';
   if (a < 3600) return rtf.format(Math.round(d/60), 'minute');
@@ -48,9 +53,9 @@ function rel(t){
   if (a < 86400*30) return rtf.format(Math.round(d/86400), 'day');
   return new Date(t*1000).toLocaleDateString('en', { year:'numeric', month:'short', day:'numeric' });
 }
-const pad2 = n => String(n).padStart(2, '0');
+const pad2 = (n: number) => String(n).padStart(2, '0');
 // yyyy-MM-dd HH:mm:ss, local time
-function absDate(t){
+function absDate(t: number){
   const d = new Date(t*1000);
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
@@ -76,18 +81,20 @@ function buildSample(){
     ['Nattaya Kongsri','nattaya@example.com'], ['Somchai Prasert','somchai@example.com'],
     ['Alex Rivera','alex@example.com'], ['Pim Suwan','pim@example.com'], ['Jordan Lee','jordan@example.com']
   ];
-  const list = [], heads = {}, deco = {}; let t = 0;
+  // heads[b] is set by commit()/branch() before any later call reads it.
+  // Commits get their row fields from prepCommit/layoutRows once loaded.
+  const list: Commit[] = [], heads: Record<string, string> = {}, deco: Record<string, string[]> = {}; let t = 0;
   const hex = () => { let s = ''; for (let i = 0; i < 40; i++) s += '0123456789abcdef'[Math.floor(rand()*16)]; return s; };
-  const mk = (parents, subject, who) => { t += 1 + Math.floor(rand()*4); const c = { hash: hex(), parents, author: people[who][0], email: people[who][1], time: t, subject, dec: '' }; list.push(c); return c.hash; };
-  const commit = (b, s, w) => { heads[b] = mk(heads[b] ? [heads[b]] : [], s, w); };
-  const branch = (nb, from) => { heads[nb] = heads[from]; };
-  const merge = (into, from, s, w) => { heads[into] = mk([heads[into], heads[from]], s || `Merge branch '${from}' into ${into}`, w); };
-  const mark = (hash, ref) => { (deco[hash] = deco[hash] || []).push(ref); };
+  const mk = (parents: string[], subject: string, who: number) => { t += 1 + Math.floor(rand()*4); const c = { hash: hex(), parents, author: people[who]![0]!, email: people[who]![1]!, time: t, subject, dec: '' } as Commit; list.push(c); return c.hash; };
+  const commit = (b: string, s: string, w: number) => { const h = heads[b]; heads[b] = mk(h ? [h] : [], s, w); };
+  const branch = (nb: string, from: string) => { heads[nb] = heads[from]!; };
+  const merge = (into: string, from: string, s: string | null, w: number) => { heads[into] = mk([heads[into]!, heads[from]!], s || `Merge branch '${from}' into ${into}`, w); };
+  const mark = (hash: string, ref: string) => { (deco[hash] = deco[hash] || []).push(ref); };
 
   commit('main','Initial commit',1);
   commit('main','Add project scaffolding and README',1);
   commit('main','Set up CI pipeline',4);
-  mark(heads.main,'tag: v0.1.0');
+  mark(heads.main!,'tag: v0.1.0');
   branch('develop','main');
   commit('develop','Add client-side router',0);
   branch('feature/auth','develop');
@@ -101,7 +108,7 @@ function buildSample(){
   commit('hotfix/login-crash','Fix crash when session cookie is missing',1);
   commit('feature/auth','Add auth unit tests',2);
   merge('main','hotfix/login-crash',null,1);
-  mark(heads.main,'tag: v0.1.1');
+  mark(heads.main!,'tag: v0.1.1');
   merge('develop','feature/auth','Merge pull request #12 from feature/auth',0);
   commit('feature/dashboard','Refactor chart widgets into hooks',3);
   merge('develop','main',null,0);
@@ -112,7 +119,7 @@ function buildSample(){
   commit('develop','Start notifications module',0);
   commit('release/0.2','Update CHANGELOG for 0.2.0',4);
   merge('main','release/0.2',null,4);
-  mark(heads.main,'tag: v0.2.0');
+  mark(heads.main!,'tag: v0.2.0');
   merge('develop','release/0.2',null,4);
   branch('feature/notifications','develop');
   branch('feature/dark-mode','develop');
@@ -120,17 +127,17 @@ function buildSample(){
   commit('feature/dark-mode','Introduce theme tokens',3);
   commit('develop','Update dependencies',0);
   commit('feature/notifications','Subscribe to websocket events',2);
-  const originNotif = heads['feature/notifications'];
+  const originNotif = heads['feature/notifications']!;
   commit('feature/dark-mode','Add theme toggle to header',3);
-  const originDevelop = heads.develop;
+  const originDevelop = heads.develop!;
   commit('develop','Fix flaky date formatting test',0);
   commit('feature/notifications','WIP: unread badge in nav bar',2);
 
-  mark(heads.main,'main'); mark(heads.main,'origin/main');
-  mark(heads.develop,'HEAD -> develop'); mark(originDevelop,'origin/develop');
-  mark(heads['feature/notifications'],'feature/notifications'); mark(originNotif,'origin/feature/notifications');
-  mark(heads['feature/dark-mode'],'feature/dark-mode'); mark(heads['feature/dark-mode'],'origin/feature/dark-mode');
-  mark(list[0].hash,'origin/HEAD');
+  mark(heads.main!,'main'); mark(heads.main!,'origin/main');
+  mark(heads.develop!,'HEAD -> develop'); mark(originDevelop,'origin/develop');
+  mark(heads['feature/notifications']!,'feature/notifications'); mark(originNotif,'origin/feature/notifications');
+  mark(heads['feature/dark-mode']!,'feature/dark-mode'); mark(heads['feature/dark-mode']!,'origin/feature/dark-mode');
+  mark(list[0]!.hash,'origin/HEAD');
 
   const now = Date.now()/1000, last = t;
   list.forEach(c => { c.time = Math.round(now - 1500 - (last - c.time) * 3600 * 1.6); c.dec = (deco[c.hash] || []).join(', '); });
@@ -140,60 +147,62 @@ function buildSample(){
 /* ---------- parsing ----------
    Desktop output uses 0x1f between fields and 0x1e after each commit.
    Pasted output (browser mode) uses "|~|" and one commit per line. */
-function parseLog(text){
+function parseLog(text: string){
   const native = text.includes('\x1f');
   const FS = native ? '\x1f' : '|~|';
   const records = native ? text.split('\x1e') : text.split(/\r?\n/);
-  const out = [], bad = [];
+  const out: Commit[] = [], bad: number[] = [];
   records.forEach((rec, i) => {
     const line = rec.replace(/^[\r\n]+/, '');
     if (!line.trim()) return;
     const f = line.split(FS);
     // Desktop records carry the committer time before the (empty) decoration.
     if (f.length < (native ? 8 : 7)) { bad.push(i+1); return; }
-    const [hash, parents, an, ae, at, ...more] = f;
+    // The length check above guarantees the first five fields.
+    const [hash, parents, an, ae, at, ...more] = f as [string, string, string, string, string, ...string[]];
     const [ct, dec, ...rest] = native ? more : [at, ...more];
     const h = hash.trim().replace(/^["']/, '');
     if (!/^[0-9a-f]{7,64}$/i.test(h)) { bad.push(i+1); return; }
     let subject = rest.join(FS);
     if (!native) subject = subject.replace(/["']$/, '');
-    out.push({ hash: h, parents: parents.trim() ? parents.trim().split(/\s+/) : [], author: an, email: ae, time: +at || 0, ctime: +ct || +at || 0, dec: dec || '', subject: subject.replace(/[\r\n]+$/, '') });
+    // Row fields are added by prepCommit/layoutRows once the commit is loaded.
+    out.push({ hash: h, parents: parents.trim() ? parents.trim().split(/\s+/) : [], author: an, email: ae, time: +at || 0, ctime: +ct! || +at || 0, dec: dec || '', subject: subject.replace(/[\r\n]+$/, '') } as Commit);
   });
   return { commits: out, bad };
 }
 
-function groupRefs(dec, remotes){
-  const map = new Map(), tags = []; let detached = false;
+function groupRefs(dec: string, remotes: Set<string>): RefGroup[]{
+  const map = new Map<string, RefGroup>(), tags: RefGroup[] = []; let detached = false;
   dec.split(',').map(s => s.trim()).filter(Boolean).forEach(r => {
     if (r === 'HEAD') { detached = true; return; }
     let head = false;
     if (r.startsWith('HEAD -> ')) { head = true; r = r.slice(8); }
     if (r.startsWith('tag: ')) { tags.push({ kind:'tag', name: r.slice(5), local:false, remotes:[], head:false }); return; }
-    const s = r.indexOf('/'); let remote = null, name = r;
+    const s = r.indexOf('/'); let remote: string | null = null, name = r;
     if (s > 0 && remotes.has(r.slice(0, s))) { remote = r.slice(0, s); name = r.slice(s+1); if (name === 'HEAD') return; }
-    const g = map.get(name) || { kind:'branch', name, local:false, remotes:[], head:false };
+    const g: RefGroup = map.get(name) || { kind:'branch', name, local:false, remotes:[], head:false };
     if (remote) g.remotes.push(remote); else g.local = true;
     if (head) g.head = true;
     map.set(name, g);
   });
-  const list = [...map.values()].sort((a,b) => (b.head - a.head) || (b.local - a.local) || a.name.localeCompare(b.name));
+  const list = [...map.values()].sort((a,b) => (+b.head - +a.head) || (+b.local - +a.local) || a.name.localeCompare(b.name));
   if (detached && !list.some(g => g.head)) list.unshift({ kind:'branch', name:'HEAD (detached)', local:true, remotes:[], head:true });
   return list.concat(tags);
 }
 
-function topoOrder(list){
-  const map = new Map(); list.forEach(c => { if (!map.has(c.hash)) map.set(c.hash, c); });
+function topoOrder<T extends RawCommit>(list: T[]): T[]{
+  const map = new Map<string, T>(); list.forEach(c => { if (!map.has(c.hash)) map.set(c.hash, c); });
   const uniq = [...map.values()];
   const kids = new Map(uniq.map(c => [c.hash, 0]));
-  uniq.forEach(c => c.parents.forEach(p => { if (kids.has(p)) kids.set(p, kids.get(p) + 1); }));
+  uniq.forEach(c => c.parents.forEach(p => { if (kids.has(p)) kids.set(p, kids.get(p)! + 1); }));
   const ready = uniq.filter(c => kids.get(c.hash) === 0).sort((a,b) => a.time - b.time);
-  const out = [], seen = new Set();
+  const out: T[] = [], seen = new Set<string>();
   while (ready.length) {
-    const c = ready.pop(); out.push(c); seen.add(c.hash);
+    const c = ready.pop()!; out.push(c); seen.add(c.hash);
     c.parents.forEach(p => {
       if (!kids.has(p)) return;
-      const k = kids.get(p) - 1; kids.set(p, k);
-      if (k === 0) { const pc = map.get(p); let lo = 0, hi = ready.length; while (lo < hi) { const m = (lo+hi) >> 1; if (ready[m].time < pc.time) lo = m + 1; else hi = m; } ready.splice(lo, 0, pc); }
+      const k = kids.get(p)! - 1; kids.set(p, k);
+      if (k === 0) { const pc = map.get(p)!; let lo = 0, hi = ready.length; while (lo < hi) { const m = (lo+hi) >> 1; if (ready[m]!.time < pc.time) lo = m + 1; else hi = m; } ready.splice(lo, 0, pc); }
     });
   }
   if (out.length < uniq.length) uniq.forEach(c => { if (!seen.has(c.hash)) out.push(c); });
@@ -205,27 +214,28 @@ function topoOrder(list){
    row already placed. An edge whose parent is not loaded yet stays open
    (to = -1, drawn to the bottom) until that parent's row is laid out.
    idx must already map every hash in `commits`, including the new rows. */
-function newLayout(){ return { lanes: [], laneColor: [], seq: 0, maxLane: 0, open: new Map() }; }
-function layoutRows(st, commits, start, idx, edges){
+function newLayout(): Layout { return { lanes: [], laneColor: [], seq: 0, maxLane: 0, open: new Map() }; }
+// laneColor[L] is set whenever lane L is taken, so reading it for a taken lane is safe.
+function layoutRows(st: Layout, commits: Commit[], start: number, idx: Map<string, number>, edges: Edge[]){
   const { lanes, laneColor } = st;
   const free = () => { let i = lanes.indexOf(null); if (i < 0) { i = lanes.length; lanes.push(null); } return i; };
-  const link = (e, row) => { const p = commits[row]; e.to = row; e.toLane = p.lane; p.children.push(e.from); };
+  const link = (e: Edge, row: number) => { const p = commits[row]!; e.to = row; e.toLane = p.lane; p.children.push(e.from); };
   for (let row = start; row < commits.length; row++) {
-    const c = commits[row];
+    const c = commits[row]!;
     if (c.stashRow) { c.row = row; c.children = []; continue; }   // placed afterwards by laneStashes
     let L = -1;
     for (let i = 0; i < lanes.length; i++) if (lanes[i] === c.hash) { if (L < 0) L = i; else lanes[i] = null; }
     if (L < 0) { L = free(); laneColor[L] = st.seq++; }
-    c.row = row; c.lane = L; c.color = laneColor[L]; c.children = [];
+    c.row = row; c.lane = L; c.color = laneColor[L]!; c.children = [];
     lanes[L] = null;
     const waiting = st.open.get(c.hash);
     if (waiting) { st.open.delete(c.hash); waiting.forEach(e => link(e, row)); }
     c.parents.forEach((p, k) => {
-      let T;
+      let T: number;
       if (k === 0) T = L;
       else { T = lanes.indexOf(p); if (T < 0) { T = free(); laneColor[T] = st.seq++; } }
       lanes[T] = p;
-      const e = { from: row, fromLane: L, lane: T, to: -1, toLane: T, color: laneColor[T] };
+      const e: Edge = { from: row, fromLane: L, lane: T, to: -1, toLane: T, color: laneColor[T]! };
       edges.push(e);
       const at = idx.get(p);
       if (at !== undefined && at < row) link(e, at);   // parent listed above its child (malformed input)
@@ -240,8 +250,8 @@ function layoutRows(st, commits, start, idx, edges){
 /* ---------- refs & incremental sync (desktop) ----------
    Labels come from the backend's ref snapshot, formatted the way git's %D
    would show them so groupRefs reads both this and pasted logs. */
-function decFromRefs(r){
-  const m = new Map(), add = (sha, s) => { const a = m.get(sha); if (a) a.push(s); else m.set(sha, [s]); };
+function decFromRefs(r: Refs){
+  const m = new Map<string, string[]>(), add = (sha: string, s: string) => { const a = m.get(sha); if (a) a.push(s); else m.set(sha, [s]); };
   const onBranch = r.headRef && r.headRef.startsWith('refs/heads/') && r.refs.some(([, n]) => n === r.headRef);
   if (r.headSha && !onBranch) add(r.headSha, 'HEAD');
   r.refs.forEach(([sha, name]) => {
@@ -249,11 +259,11 @@ function decFromRefs(r){
     else if (name.startsWith('refs/remotes/')) add(sha, name.slice(13));
     else if (name.startsWith('refs/tags/')) add(sha, 'tag: ' + name.slice(10));
   });
-  const out = new Map();
+  const out = new Map<string, string>();
   m.forEach((a, sha) => out.set(sha, a.join(', ')));
   return out;
 }
-function tipsOf(r){
+function tipsOf(r: Refs){
   const t = new Set(r.refs.map(([sha]) => sha));
   if (r.headSha) t.add(r.headSha);
   return t;
@@ -265,7 +275,8 @@ function tipsOf(r){
    the result matches a fresh load; the caller then reloads. */
 /* refs: the refs the walk starts from (tips); labels: what gets labelled
    (defaults to refs; solo adds tags that are not part of the walk). */
-function planSync(cur, refs, fresh, labels = refs){
+interface SyncFrom { commits: Commit[]; idx: Map<string, number>; tips: Set<string>; more?: boolean }
+function planSync(cur: SyncFrom, refs: Refs, fresh: Commit[], labels: Refs = refs){
   const tips = tipsOf(refs);
   const added = fresh.filter(c => !cur.idx.has(c.hash));
   const removed = [...cur.tips].filter(t => !tips.has(t));
@@ -274,41 +285,42 @@ function planSync(cur, refs, fresh, labels = refs){
     // Loaded rows are a prefix of a children-first order, so every child of
     // a loaded commit is loaded too. Walking parents inside the loaded set
     // therefore finds exactly the loaded commits that are still reachable.
-    const seen = new Uint8Array(cur.commits.length), stack = [];
+    const seen = new Uint8Array(cur.commits.length), stack: number[] = [];
     cur.commits.forEach((c, i) => { if (c.stashRow) seen[i] = 1; });   // stash rows hang off refs/stash, not branches
-    const reach = h => { const i = cur.idx.get(h); if (i !== undefined && !seen[i]) { seen[i] = 1; stack.push(i); } };
+    const reach = (h: string) => { const i = cur.idx.get(h); if (i !== undefined && !seen[i]) { seen[i] = 1; stack.push(i); } };
     tips.forEach(reach);
     added.forEach(c => c.parents.forEach(reach));
-    while (stack.length) cur.commits[stack.pop()].parents.forEach(reach);
+    while (stack.length) cur.commits[stack.pop()!]!.parents.forEach(reach);
     if (seen.includes(0)) return { full: 'history was rewritten' };
   }
   const order = mergeNew(added, cur.commits, cur.idx);
   // A new commit older than every loaded row belongs somewhere in the part
   // not loaded yet; only a reload can put it in the right place.
-  if (cur.more && added.length && added.includes(order[order.length - 1])) return { full: 'new commits below the loaded rows' };
+  if (cur.more && added.length && added.includes(order[order.length - 1]!)) return { full: 'new commits below the loaded rows' };
   return { tips, added, removed, order, dec: decFromRefs(labels), refs };
 }
 
 /* Places new commits among the loaded ones the way `git log --date-order`
    would: newest committer time first, but every new commit above its
    parents. New commits are never parents of old ones. */
-function mergeNew(added, old, idx){
+function mergeNew(added: Commit[], old: Commit[], idx: Map<string, number>): Commit[]{
   if (!added.length) return old;
-  const need = new Map();   // old hash -> last new commit that must precede it
+  const need = new Map<string, number>();   // old hash -> last new commit that must precede it
   added.forEach((c, k) => c.parents.forEach(p => { if (idx.has(p)) need.set(p, k); }));
-  const out = []; let k = 0;
+  const out: Commit[] = []; let k = 0;
+  // Sync only runs on desktop, whose records always carry ctime.
   for (const o of old) {
-    const must = need.has(o.hash) ? need.get(o.hash) : -1;
-    while (k < added.length && (k <= must || added[k].ctime >= o.ctime)) out.push(added[k++]);
+    const must = need.has(o.hash) ? need.get(o.hash)! : -1;
+    while (k < added.length && (k <= must || added[k]!.ctime! >= o.ctime!)) out.push(added[k++]!);
     out.push(o);
   }
-  while (k < added.length) out.push(added[k++]);
+  while (k < added.length) out.push(added[k++]!);
   return out;
 }
 
 /* Y maps a content y to canvas y; it clamps so an edge spanning thousands of
    rows never hands the canvas huge coordinates. */
-function traceEdge(ctx, e, n, Y){
+function traceEdge(ctx: CanvasRenderingContext2D, e: Edge, n: number, Y: (y: number) => number){
   const rr = 8, x1 = lx(e.fromLane), y1 = ry(e.from), xT = lx(e.lane);
   const y2 = e.to >= 0 ? ry(e.to) : n * ROW_H + 6, x2 = lx(e.toLane);
   ctx.moveTo(x1, Y(y1));
@@ -318,7 +330,7 @@ function traceEdge(ctx, e, n, Y){
 }
 
 /* ---------- state ---------- */
-let S = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
+let S: AppState = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
 let sel = -1, matches = [], matchPtr = -1, matchSet = null;
 const wrap = $('#wrap'), grid = $('#grid'), body = $('#body'), detail = $('#detail');
 /* Column widths in px. graph null = wide enough for every lane; msg null =
