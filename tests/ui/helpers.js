@@ -1,6 +1,5 @@
-// Injected before every suite's probe. A probe calls run(async () => { ... }).
-const log = [];
-addEventListener('error', e => log.push('ERR ' + e.message + ' @' + e.lineno));
+// Injected before every suite's probe (after capture.js, which owns `log`).
+// A probe calls run(async () => { ... }).
 const ok = (c, n, x = '') => log.push((c ? 'PASS ' : 'FAIL ') + n + (c ? '' : ' :: ' + x));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const run = fn => addEventListener('load', async () => {

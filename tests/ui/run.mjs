@@ -20,9 +20,9 @@ if (!edge) { console.error('Microsoft Edge not found; set EDGE_PATH'); process.e
 const builds = { test: join(here, '.build', 'test'), prod: join(here, '.build', 'prod') };
 for (const [kind, dir] of Object.entries(builds)) {
   const r = spawnSync(process.execPath, [join(root, 'scripts', 'web.mjs'), ...(kind === 'test' ? ['--test'] : []), '--out', dir], { stdio: 'inherit' });
-  if (r.status) process.exit(r.status ?? 1);
+  if (r.error || r.status !== 0) process.exit(r.status || 1);
 }
-const helpers = readFileSync(join(here, 'helpers.js'), 'utf8');
+const capture = readFileSync(join(here, 'capture.js'), 'utf8'), helpers = readFileSync(join(here, 'helpers.js'), 'utf8');
 const decode = s => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 
 let failed = 0;
@@ -33,9 +33,9 @@ for (const file of readdirSync(here).filter(f => f.endsWith('.suite.mjs') && (!f
     const name = `${file.replace('.suite.mjs', '')}${v.name ? ':' + v.name : ''}${kind === 'prod' ? ' [prod]' : ''}`;
     const dir = builds[kind];
     const html = readFileSync(join(dir, 'index.html'), 'utf8')
-      .replace('<head>', `<head><base href="${pathToFileURL(dir).href}/">`)
-      .replace('<html lang="en">', `<html lang="en"${v.theme ? ` data-theme="${v.theme}"` : ''}>`)
-      .replace('<script src="app.js"></script>', `${typeof s.setup === 'function' ? s.setup(v) : s.setup || ''}<script src="app.js"></script><script>${helpers}</script><script>${s.probe}</script>`);
+      .replace('<head>', () => `<head><base href="${pathToFileURL(dir).href}/">`)
+      .replace('<html lang="en">', () => `<html lang="en"${v.theme ? ` data-theme="${v.theme}"` : ''}>`)
+      .replace('<script src="app.js"></script>', () => `<script>${capture}</script>${typeof s.setup === 'function' ? s.setup(v) : s.setup || ''}<script src="app.js"></script><script>${helpers}</script><script>${s.probe}</script>`);
     const page = join(dir, `${name.replace(/\W+/g, '_')}.html`);
     writeFileSync(page, html);
     const prof = mkdtempSync(join(tmpdir(), 'lanes-ui-'));

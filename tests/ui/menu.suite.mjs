@@ -15,6 +15,7 @@ const leaf = sel => document.querySelector('#sideList ' + sel);
 const esc = () => menu() && menu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
 run(async () => {
+  ok('$&$$'.length === 4, 'runner keeps $ in probe text');
   // ---- panel: a local branch that is not checked out ----
   const l = leaf('.sb-leaf[data-kind="branch"][data-can-hide][data-ref^="refs/heads/"]');
   ok(!!l, 'sample has a hideable local branch');
