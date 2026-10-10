@@ -1,6 +1,6 @@
 (() => {
 'use strict';
-const ROW_H = 34, LANE_W = 24, PAD = 12, R = 11, DOT = 5.5;
+const ROW_H = 38, LANE_W = 30, PAD = 16, R = 11, DOT = 5.5;   // ROW_H = --rowh in app.css
 // History loads a page at a time; the next page is fetched once the viewport
 // gets within PREFETCH rows of the end of what is loaded.
 const PAGE = 5000, PREFETCH = 2000, POLL_MS = 3000;

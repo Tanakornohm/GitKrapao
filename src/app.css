@@ -3,7 +3,7 @@
   --text:#1a1f27; --text-2:#4b5563; --text-3:#8a93a1;
   --row-hover:rgba(20,30,50,.045); --row-sel:rgba(64,120,240,.13);
   --accent:#3f74e8; --node-stroke:#f5f6f8; --shadow:rgba(20,30,50,.18);
-  --rowh:34px;
+  --rowh:38px;   /* = ROW_H in app.js */
   --lanes:#0b8fb3,#3f7cf6,#a454f0,#e341c3,#f23f5f,#d46210,#a87d00,#3d9a2a,#13977a;
   --add:#1a7f37; --del:#cf222e;
   --sx-kw:#cf222e; --sx-st:#0a3069; --sx-cm:#6e7781; --sx-nu:#0550ae; --sx-fn:#8250df; --sx-ty:#953800; --sx-tg:#116329;
