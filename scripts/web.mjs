@@ -4,7 +4,7 @@
 // an empty folder). --test sets __TEST__ so tests/ui can read app state;
 // production bundles drop that code.
 import { build, context } from 'esbuild';
-import { copyFileSync, existsSync, mkdirSync, watch } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync, watch } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,6 +27,8 @@ const options = {
 };
 
 copyStatic();
+// A map left by an earlier watch/test build would otherwise ship inside the installer.
+if (!options.sourcemap) rmSync(join(out, 'app.js.map'), { force: true });
 if (isWatch) {
   const ctx = await context(options);
   await ctx.rebuild();
