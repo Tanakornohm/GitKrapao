@@ -12,6 +12,7 @@ use tauri::{Manager, RunEvent, State};
 use tauri_plugin_dialog::DialogExt;
 
 mod fetch;
+mod switch;
 
 /// Field separator (0x1f) and record separator (0x1e) never appear in normal
 /// commit metadata, so subjects containing "|" or quotes parse safely.
@@ -176,10 +177,10 @@ struct AppState {
     stream: Mutex<Option<Stream>>,
     next_gen: AtomicU64,
     dirs: Mutex<HashMap<String, GitDirs>>,
-    /// Lock keys (GitDirs::lock_key) of repos with a fetch running.
-    fetching: Arc<Mutex<HashSet<String>>>,
-    /// PID of the running fetch, so closing the app can stop it.
-    fetch_pid: Mutex<Option<u32>>,
+    /// Lock keys (GitDirs::lock_key) of repos with a fetch or switch running.
+    busy_repos: Arc<Mutex<HashSet<String>>>,
+    /// PID of the running fetch or switch, so closing the app can stop it.
+    op_pid: Mutex<Option<u32>>,
     /// Serializes reads and writes of the trust file.
     trust_lock: Mutex<()>,
 }
@@ -554,7 +555,7 @@ fn rev_args(hidden: &[String], solo: &[String]) -> Result<Vec<String>, String> {
 async fn start_history(path: String, hidden: Vec<String>, solo: Vec<String>, state: State<'_, AppState>) -> Result<StreamInfo, String> {
     let revs = rev_args(&hidden, &solo)?;
     let dirs = dirs_for(&state, &path)?;
-    if fetch::is_fetching(&state, &dirs) {
+    if fetch::is_busy(&state, &dirs) {
         return Err(fetch::BUSY.into());
     }
     let repo = PathBuf::from(&path);
@@ -611,7 +612,7 @@ async fn sync_history(path: String, exclude: Vec<String>, hidden: Vec<String>, s
     }
     let revs = rev_args(&hidden, &solo)?;
     let dirs = dirs_for(&state, &path)?;
-    if fetch::is_fetching(&state, &dirs) {
+    if fetch::is_busy(&state, &dirs) {
         return Err(fetch::BUSY.into());
     }
     let repo = PathBuf::from(&path);
@@ -1426,11 +1427,11 @@ async fn branch_tracking(path: String) -> Result<Vec<Track>, String> {
 }
 
 #[tauri::command]
-/// None while a fetch runs in the repo: its refs are changing, so the
+/// None while a fetch or switch runs in the repo: its refs are changing, so the
 /// caller skips this poll.
 async fn repo_fingerprint(path: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
     let dirs = dirs_for(&state, &path)?;
-    Ok((!fetch::is_fetching(&state, &dirs)).then(|| fingerprint(&dirs)))
+    Ok((!fetch::is_busy(&state, &dirs)).then(|| fingerprint(&dirs)))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1438,7 +1439,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes])
+        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch])
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
         .run(|app, event| {
@@ -1448,7 +1449,7 @@ pub fn run() {
                 if let Some(s) = state.stream.lock().unwrap().as_ref() {
                     s.kill();
                 }
-                let pid = *state.fetch_pid.lock().unwrap();
+                let pid = *state.op_pid.lock().unwrap();
                 if let Some(pid) = pid {
                     kill_tree(pid);
                 }

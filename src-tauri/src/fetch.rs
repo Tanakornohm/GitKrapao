@@ -32,36 +32,41 @@ const FETCH_CONFIG_RE: &str = r"^(core\.(sshcommand|gitproxy|askpass|hookspath|a
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct FetchResult {
-    ok: bool,
-    timed_out: bool,
-    /// The user did not trust the repo in the dialog; nothing ran.
-    cancelled: bool,
+/// Outcome of a fetch or a branch switch, shown in the Output drawer.
+pub(crate) struct GitResult {
+    pub ok: bool,
+    pub timed_out: bool,
+    /// The user answered Cancel in the native dialog; nothing changed.
+    pub cancelled: bool,
     #[cfg_attr(test, ts(type = "number"))]
-    duration_ms: u64,
+    pub duration_ms: u64,
     /// None when git did not run or was killed.
-    exit_code: Option<i32>,
-    command: String,
-    stdout: String,
-    stderr: String,
+    pub exit_code: Option<i32>,
+    pub command: String,
+    pub stdout: String,
+    pub stderr: String,
     /// One line for the banner; stderr keeps git's own words.
-    summary: String,
+    pub summary: String,
 }
 
-impl FetchResult {
-    /// fetch did not run: refused, cancelled or nothing to fetch from.
-    fn refused(summary: impl Into<String>, cancelled: bool) -> Self {
-        FetchResult {
+impl GitResult {
+    /// git did not run (or not to the end): refused, cancelled, or a step before it failed.
+    pub(crate) fn not_run(command: String, summary: impl Into<String>, cancelled: bool) -> Self {
+        GitResult {
             ok: false,
             timed_out: false,
             cancelled,
             duration_ms: 0,
             exit_code: None,
-            command: command_text(),
+            command,
             stdout: String::new(),
             stderr: String::new(),
             summary: summary.into(),
         }
+    }
+
+    fn refused(summary: impl Into<String>, cancelled: bool) -> Self {
+        Self::not_run(command_text(), summary, cancelled)
     }
 }
 
@@ -71,19 +76,19 @@ fn command_text() -> String {
 
 /* ---------- lock ---------- */
 
-/// Marks a repo as fetching; dropping it (also on a panic) frees the repo.
-pub(crate) struct FetchLock {
+/// Marks a repo as busy (fetch or switch); dropping it (also on a panic) frees the repo.
+pub(crate) struct RepoLock {
     set: Arc<Mutex<HashSet<String>>>,
     key: String,
 }
 
-impl FetchLock {
-    fn take(set: &Arc<Mutex<HashSet<String>>>, key: &str) -> Option<Self> {
-        set.lock().unwrap().insert(key.to_string()).then(|| FetchLock { set: set.clone(), key: key.to_string() })
+impl RepoLock {
+    pub(crate) fn take(set: &Arc<Mutex<HashSet<String>>>, key: &str) -> Option<Self> {
+        set.lock().unwrap().insert(key.to_string()).then(|| RepoLock { set: set.clone(), key: key.to_string() })
     }
 }
 
-impl Drop for FetchLock {
+impl Drop for RepoLock {
     fn drop(&mut self) {
         // A poisoned lock still holds the set; never leave the repo marked.
         let mut set = self.set.lock().unwrap_or_else(|e| e.into_inner());
@@ -91,8 +96,8 @@ impl Drop for FetchLock {
     }
 }
 
-pub(crate) fn is_fetching(state: &AppState, dirs: &GitDirs) -> bool {
-    state.fetching.lock().unwrap().contains(&dirs.lock_key)
+pub(crate) fn is_busy(state: &AppState, dirs: &GitDirs) -> bool {
+    state.busy_repos.lock().unwrap().contains(&dirs.lock_key)
 }
 
 /* ---------- reading config ---------- */
@@ -124,7 +129,7 @@ fn parse_config_z(out: &[u8]) -> Vec<ConfigEntry> {
     list
 }
 
-fn git_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Command {
+pub(crate) fn git_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Command {
     let mut cmd = git_command(repo, args);
     for (k, v) in env {
         cmd.env(k, v);
@@ -288,7 +293,7 @@ pub(crate) fn allow_repo(app: &tauri::AppHandle, state: &AppState, top: &str) {
 
 /// Control and bidi/format characters are shown as escapes, so a value cannot
 /// fake extra lines or reorder text in the dialog. Cut at `max` characters.
-fn sanitize(s: &str, max: usize) -> String {
+pub(crate) fn sanitize(s: &str, max: usize) -> String {
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
         if i == max {
@@ -402,17 +407,25 @@ fn fetch_summary(ok: bool, timed_out: bool, code: Option<i32>, stderr: &str, ssh
         "SSH does not know this host yet. Connect once from a terminal to accept its key, then fetch again.".into()
     } else if has(&["could not resolve host", "could not resolve hostname", "network is unreachable", "failed to connect", "connection timed out", "connection refused", "no route to host"]) {
         "Could not reach the remote. Check your network connection.".into()
-    } else if l.contains(".lock") && has(&["unable to create", "file exists"]) {
-        "Another git process is updating this repository (a .lock file exists). Wait for it to finish, then fetch again.".into()
     } else {
-        stderr
-            .lines()
-            .rev()
-            .map(str::trim)
-            .find_map(|x| x.strip_prefix("fatal:").or_else(|| x.strip_prefix("error:")))
-            .map(|x| x.trim().to_string())
-            .unwrap_or_else(|| format!("git fetch failed (exit code {}).", code.map_or("unknown".into(), |c| c.to_string())))
+        git_error(stderr, code, "git fetch")
     }
+}
+
+/// A failure line shared by fetch and switch: a left-over lock file, else
+/// git's last fatal:/error: line, else the exit code.
+pub(crate) fn git_error(stderr: &str, code: Option<i32>, what: &str) -> String {
+    let l = stderr.to_ascii_lowercase();
+    if l.contains(".lock") && (l.contains("unable to create") || l.contains("file exists")) {
+        return "Another git process is updating this repository (a .lock file exists). Wait for it to finish, then try again.".into();
+    }
+    stderr
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find_map(|x| x.strip_prefix("fatal:").or_else(|| x.strip_prefix("error:")))
+        .map(|x| x.trim().to_string())
+        .unwrap_or_else(|| format!("{what} failed (exit code {}).", code.map_or("unknown".into(), |c| c.to_string())))
 }
 
 /* ---------- fetch ---------- */
@@ -430,22 +443,22 @@ pub(crate) struct FetchCtx<'a> {
 }
 
 /// Runs the checks, asks when needed, then fetches. The caller holds the
-/// repo's FetchLock. `top` is the resolved toplevel.
-pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> FetchResult {
+/// repo's RepoLock. `top` is the resolved toplevel.
+pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> GitResult {
     let repo = Path::new(top);
     let remotes = match remote_urls(repo, cx.env) {
         Ok(r) => r,
-        Err(e) => return FetchResult::refused(e, false),
+        Err(e) => return GitResult::refused(e, false),
     };
     if remotes.is_empty() {
-        return FetchResult::refused("This repository has no remotes configured.", false);
+        return GitResult::refused("This repository has no remotes configured.", false);
     }
     let entries = match read_fetch_config(repo, cx.env) {
         Ok(e) => e,
-        Err(e) => return FetchResult::refused(format!("Could not check this repository's config, so it was not fetched: {e}"), false),
+        Err(e) => return GitResult::refused(format!("Could not check this repository's config, so it was not fetched: {e}"), false),
     };
     if let Some(why) = refspec_problem(&entries, common_dir) {
-        return FetchResult::refused(why, false);
+        return GitResult::refused(why, false);
     }
 
     let mut shown = Vec::new();
@@ -474,7 +487,7 @@ pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> FetchResu
     if new_repo || changed {
         // The store lock is not held while the dialog is open.
         if !(cx.ask)(&trust_text(top, new_repo, &remotes, if changed { &shown } else { &[] })) {
-            return FetchResult::refused("Fetch cancelled: the repository was not trusted.", true);
+            return GitResult::refused("Fetch cancelled: the repository was not trusted.", true);
         }
         if let Err(e) = update_store(cx.store, cx.store_lock, &key, |t| {
             t.fetch = true;
@@ -482,20 +495,20 @@ pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> FetchResu
                 t.config = hash.clone();
             }
         }) {
-            return FetchResult::refused(format!("Could not save your answer: {e}"), false);
+            return GitResult::refused(format!("Could not save your answer: {e}"), false);
         }
     }
 
     let run = run_limited(git_env(repo, &FETCH_ARGS, cx.env), cx.limit, MAX_OUTPUT, cx.pid);
     let r = match run {
         Ok(r) => r,
-        Err(e) => return FetchResult::refused(spawn_error(e), false),
+        Err(e) => return GitResult::refused(spawn_error(e), false),
     };
     let ok = !r.timed_out && r.status.is_some_and(|s| s.success());
     let exit_code = r.status.and_then(|s| s.code());
     let stderr = String::from_utf8_lossy(&r.stderr).into_owned();
     let ssh = remotes.iter().any(|(_, u)| is_ssh_url(u));
-    FetchResult {
+    GitResult {
         ok,
         timed_out: r.timed_out,
         cancelled: false,
@@ -510,37 +523,38 @@ pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> FetchResu
 
 /// Native, modal, and not reachable from the webview (the dialog plugin has
 /// no permission in capabilities/default.json), so page script cannot answer it.
-fn ask_trust(app: &tauri::AppHandle, text: &str) -> bool {
+/// True for `ok`; Cancel or closing the dialog is false.
+pub(crate) fn ask_native(app: &tauri::AppHandle, title: &str, ok: &str, text: &str) -> bool {
     let mut d = app
         .dialog()
         .message(text)
-        .title("Fetch: trust this repository?")
+        .title(title)
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("Fetch".into(), "Cancel".into()));
+        .buttons(MessageDialogButtons::OkCancelCustom(ok.into(), "Cancel".into()));
     if let Some(w) = app.get_webview_window("main") {
         d = d.parent(&w);
     }
     d.blocking_show()
 }
 
-/// Fetches every remote of the repo. Err only for "busy" (a fetch already
-/// runs here) or a path that is not a repository; every other outcome is a
-/// FetchResult so the output log can show it.
+/// Fetches every remote of the repo. Err only for "busy" (a fetch or switch
+/// already runs here) or a path that is not a repository; every other outcome is a
+/// GitResult so the output log can show it.
 #[tauri::command]
-pub(crate) async fn fetch(app: tauri::AppHandle, path: String, state: State<'_, AppState>) -> Result<FetchResult, String> {
+pub(crate) async fn fetch(app: tauri::AppHandle, path: String, state: State<'_, AppState>) -> Result<GitResult, String> {
     // Resolved here rather than trusting the path string as given.
     let info = resolve_repo(&state, Path::new(&path))?;
     let dirs = state.dirs.lock().unwrap()[&info.path].clone(); // inserted by resolve_repo
-    let lock = FetchLock::take(&state.fetching, &dirs.lock_key).ok_or(BUSY)?;
+    let lock = RepoLock::take(&state.busy_repos, &dirs.lock_key).ok_or(BUSY)?;
     let store = trust_file(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _lock = lock;
         let state = app.state::<AppState>();
-        let ask = |text: &str| ask_trust(&app, text);
+        let ask = |text: &str| ask_native(&app, "Fetch: trust this repository?", "Fetch", text);
         fetch_in(
             &info.path,
             &dirs.common_dir,
-            &FetchCtx { store: &store, store_lock: &state.trust_lock, ask: &ask, limit: LIMIT, env: &[], pid: Some(&state.fetch_pid) },
+            &FetchCtx { store: &store, store_lock: &state.trust_lock, ask: &ask, limit: LIMIT, env: &[], pid: Some(&state.op_pid) },
         )
     })
     .await
@@ -613,10 +627,10 @@ mod tests {
         fn store(&self) -> PathBuf { self.dir.join("trust.json") }
         /// Runs fetch_in on the local clone; `answer` replies to the dialog,
         /// and every question asked is recorded.
-        fn fetch(&self, answer: bool, asked: &RefCell<Vec<String>>) -> FetchResult {
+        fn fetch(&self, answer: bool, asked: &RefCell<Vec<String>>) -> GitResult {
             self.fetch_with(answer, asked, Duration::from_secs(60))
         }
-        fn fetch_with(&self, answer: bool, asked: &RefCell<Vec<String>>, limit: Duration) -> FetchResult {
+        fn fetch_with(&self, answer: bool, asked: &RefCell<Vec<String>>, limit: Duration) -> GitResult {
             let lock = Mutex::new(());
             let ask = |t: &str| { asked.borrow_mut().push(t.to_string()); answer };
             let env = self.env();
@@ -820,11 +834,11 @@ mod tests {
     #[test]
     fn lock_is_per_repo() {
         let set = Arc::new(Mutex::new(HashSet::new()));
-        let a = FetchLock::take(&set, "a").unwrap();
-        assert!(FetchLock::take(&set, "a").is_none(), "a second fetch is busy");
-        assert!(FetchLock::take(&set, "b").is_some());
+        let a = RepoLock::take(&set, "a").unwrap();
+        assert!(RepoLock::take(&set, "a").is_none(), "a second fetch is busy");
+        assert!(RepoLock::take(&set, "b").is_some());
         drop(a);
-        assert!(FetchLock::take(&set, "a").is_some());
+        assert!(RepoLock::take(&set, "a").is_some());
     }
 
     #[test]
