@@ -46,6 +46,16 @@ A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 - The Refresh button and Ctrl/⌘ R always do a full reload (the escape hatch when something is wrong).
 - `streamPos` is the number of records read from the stream; it differs from `S.commits.length` once commits have come in through sync.
 
+## Fetch (src-tauri/src/fetch.rs)
+- Manual only: the toolbar button and Ctrl/⌘ Shift F (no background fetch, so no surprise credential popups). One fetch at a time app-wide (`fetchingPath`).
+- Command: `git fetch --all --prune --no-prune-tags --no-auto-maintenance --no-recurse-submodules`. Add only flags that turn behaviour off; local branches and tags must never be deleted or overwritten. Never pass `-c` overrides of `core.sshCommand` / `credential.helper` (they would override the user's global config); `GIT_TERMINAL_PROMPT=0` stays.
+- Refused before git runs: a `remote.*.fetch` destination outside `refs/remotes/`, `remote.*.mirror`, any file in the legacy `.git/remotes/` or `.git/branches/` folders (`--prune` could then delete local refs).
+- Trust: one `git config --show-scope --includes -z --get-regexp` call (`--includes` matters: `--local` alone misses an `include.path`). Keys from local/worktree scope that run programs or redirect fetch, plus a `reference-transaction` hook file, go into a native dialog (`ask_trust`, Rust side, so page script cannot answer it). Exit codes other than 0/1 refuse. Approvals and the allowlist live in `app_data_dir()/trust.json` as SHA-256 hashes (`sha2`, stable across Rust versions); `pick_repo` allowlists its folder, a repo opened from recents asks once.
+- Lock per canonical common dir (`GitDirs.lock_key`, shared by linked worktrees), held from before the dialog to the end: `repo_fingerprint` returns null and `start_history`/`sync_history` return `"busy"`; the UI pauses polling, defers a refresh and syncs once when the fetch ends.
+- `run_limited` (also under `output_within`) kills the whole process tree on timeout (`taskkill /T`): `git` on PATH is a launcher, and a plain kill leaves the real git, ssh and remote helpers running. The 90 s limit starts when git starts, not when the dialog opens.
+- Results are a `FetchResult` (only "busy" is an Err) logged in the Output drawer (last 50, memory only, text via `textContent`); failures also go to the banner.
+- Tests: `cargo test --lib fetch` uses temp repos with a local bare remote and an empty global config (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`); the timeout test proves the tree kill with a marker file. UI: `tests/ui/fetch.suite.mjs` with a fake `__TAURI__`.
+
 ## Column widths
 - Every column is resizable at the right edge of its header (drag / double-click to reset / arrow keys when focused). Widths live in `cols` and are saved in localStorage `lanes.cols`.
 - `graph: null` = wide enough for every lane, `msg: null` = fill the remaining space. If the Graph column is narrower than the lanes, the canvas is cut and fades at the edge (`graphColW()` is used instead of `S.graphW` when drawing).
