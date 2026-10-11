@@ -138,3 +138,4 @@ A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 - Requires Rust (cargo) and the Visual Studio 2026 workload "Desktop development with C++" + Windows SDK.
 - The `dev`/`build`/`tauri` scripts run through `scripts/tauri.mjs`, which adds `%USERPROFILE%\.cargo\bin` (or `CARGO_HOME\bin`) to PATH, because VS Code terminals opened before Rust was installed keep the old PATH (VS Code must be fully closed to pick up the new one).
 - The error `link: extra operand` means MSVC's `link.exe` was not found and Git's `link` was used instead.
+- The main window starts hidden (`"visible": false`) and `run()` shows it on page load (`on_page_load` → Finished, 5 s fallback in `setup`): WebView2 paints white for 1–4 s before the page is up, a big white box over the dark theme.

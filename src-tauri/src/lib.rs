@@ -1439,6 +1439,23 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        // The window starts hidden (tauri.conf.json): WebView2 paints white for
+        // a second or more before the page is up, a big white box over a dark
+        // theme. Show it once the page has loaded, or after 5 s whatever happens.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                let _ = webview.window().show();
+            }
+        })
+        .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(5));
+                    let _ = w.show();
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch])
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
