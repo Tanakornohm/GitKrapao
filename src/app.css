@@ -242,10 +242,10 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .sb-solo.on{color:var(--accent)}
 .sb-eye svg,.sb-solo svg{display:block}
 .is-solo > .sb-row .sb-name{color:var(--text);font-weight:600}
-.side-hidden.solo{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text)}
+.sb-hidebar.solo{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text)}
 .is-hidden > .sb-row .sb-name,.is-hidden > .sb-row .sb-track{opacity:.45}
-.side-hidden{display:flex;align-items:center;gap:8px;margin:0 8px 4px;padding:4px 4px 4px 10px;border-radius:6px;background:var(--panel-2);font-size:12px;color:var(--text-2);flex:none}
-.side-hidden span{flex:1;min-width:0}
+.sb-hidebar{display:flex;align-items:center;gap:8px;margin:0 8px 4px;padding:4px 4px 4px 10px;border-radius:6px;background:var(--panel-2);font-size:12px;color:var(--text-2);flex:none}
+.sb-hidebar span{flex:1;min-width:0}
 .sb-av{width:16px;height:16px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:8px;font-weight:600;line-height:1}
 .sb-tag{flex:none;font-size:10px;font-weight:500;padding:0 5px;border-radius:8px;line-height:16px;background:var(--panel-2);color:var(--text-2)}
 .sb-pr.draft .sb-name{color:var(--text-3)}
