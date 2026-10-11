@@ -1,7 +1,7 @@
 /* Calls into the Rust side. Results are typed by the ts-rs bindings; the
    arguments of each command are written here because they are not structs. */
 import type { CommitDetail } from './bindings/CommitDetail';
-import type { FetchResult } from './bindings/FetchResult';
+import type { GitResult } from './bindings/GitResult';
 import type { FileDiff } from './bindings/FileDiff';
 import type { Page } from './bindings/Page';
 import type { PrList } from './bindings/PrList';
@@ -26,11 +26,13 @@ export interface Commands {
   pull_requests: { args: { path: string }; result: PrList };
   open_url: { args: { url: string }; result: null };
   branch_tracking: { args: { path: string }; result: Track[] };
-  /** null while a fetch runs in the repo: skip this poll. */
+  /** null while a fetch or switch runs in the repo: skip this poll. */
   repo_fingerprint: { args: { path: string }; result: string | null };
-  /** Rejects with 'busy' when a fetch already runs in the repo. */
-  fetch: { args: { path: string }; result: FetchResult };
+  /** Rejects with 'busy' when a fetch or switch already runs in the repo. */
+  fetch: { args: { path: string }; result: GitResult };
   list_remotes: { args: { path: string }; result: string[] };
+  /** target: refs/heads/x or refs/remotes/<remote>/x. Rejects with 'busy' like fetch. */
+  switch_branch: { args: { path: string; target: string }; result: GitResult };
 }
 
 const core = window.__TAURI__?.core;
