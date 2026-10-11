@@ -6,10 +6,10 @@ A GitKraken-style Git history viewer for the desktop. It reads repositories on y
 
 Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no framework; esbuild bundles the UI into one file.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/graph-dark.png">
-  <img alt="GitKrapao showing the commit graph of a sample repository: branch labels, colored lanes with merges, the branch panel on the left and commit details on the right" src="docs/screenshots/graph-light.png">
-</picture>
+<p>
+  <img src="docs/screenshots/graph-dark.png" width="49%" alt="GitKrapao showing the commit graph of a sample repository in the dark theme">
+  <img src="docs/screenshots/graph-light.png" width="49%" alt="GitKrapao showing the commit graph of a sample repository in the light theme">
+</p>
 
 ## Features
 
