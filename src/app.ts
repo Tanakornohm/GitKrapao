@@ -1,6 +1,7 @@
 import { Syntax } from './highlight';
 import type { Token } from './highlight';
 import type { CommitDetail } from './bindings/CommitDetail';
+import type { FetchResult } from './bindings/FetchResult';
 import type { FileChange } from './bindings/FileChange';
 import type { FileDiff } from './bindings/FileDiff';
 import type { DiffKind } from './ipc';
@@ -729,6 +730,7 @@ function updateView(){
   // From the ref snapshot, not the labels: solo can leave HEAD unlabelled.
   const hr = S.refs && S.refs.headRef;
   $('#headName').textContent = hr ? hr.replace(/^refs\/heads\//, '') : S.refs && S.refs.headSha ? 'detached' : headG ? headG.name : '—';
+  renderHeadTrack(); updateFetchBtn();
   $('#sampleBadge').hidden = !S.sample;
   const note = S.note + (S.bad ? `, ${S.bad} unreadable entries skipped` : '')
     + (S.capped ? ', history cut off at 2,000,000 commits' : '');
@@ -1368,7 +1370,7 @@ async function loadTracking(){
     const list = await invoke('branch_tracking', { path });
     if (seq !== trackSeq || !current || current.path !== path) return;
     S.track = new Map(list.map(t => [t.name, t]));
-    renderSide();
+    renderSide(); renderHeadTrack();
   } catch (e) { /* the counts are extras; the panel works without them */ }
 }
 
@@ -1561,7 +1563,7 @@ function wipHead(): number{
 }
 
 async function loadWip({ force = false }: { force?: boolean } = {}){
-  if (!NATIVE || !current || document.hidden || wipBusy) return;
+  if (!NATIVE || !current || document.hidden || wipBusy || fetchingHere()) return;
   if (!force && Date.now() < wipNext) return;
   wipBusy = true;
   const seq = ++wipSeq, path = current.path, t0 = performance.now();
@@ -2136,6 +2138,8 @@ function showEmpty(){
 
 async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep?: boolean; manual?: boolean } = {}){
   if (busy) return;
+  // The backend refuses while a fetch updates this repo's refs; runFetch loads it when done.
+  if (fetchingPath === info.path) { pendingLoad = { info, keep, manual }; return; }
   busy = true; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
   const hg = hiddenGen, hidden = hiddenList(info.path), solo = soloList(info.path);
@@ -2160,8 +2164,11 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
     hideError();
     loadTracking(); loadStashes(); loadPrs({ force: manual }); loadWip({ force: true });
   } catch (e) {
-    showError(String(e));
-    if (!current) showEmpty();
+    if (String(e) === BUSY) pendingLoad = { info, keep, manual };
+    else {
+      showError(String(e));
+      if (!current) showEmpty();
+    }
   } finally {
     busy = false; document.body.classList.remove('loading');
     // Branches were hidden or shown while this ran with the old list.
@@ -2228,7 +2235,7 @@ async function refresh(){ if (current) await loadRepo(current, { keep: true, man
    merge it in. Anything the plan cannot prove correct falls back to a full
    reload at the same depth. */
 async function syncRepo(){
-  if (!current || busy || moreBusy) return;
+  if (!current || busy || moreBusy || fetchingHere()) return;
   let full: string | null = S.forceFull ? 'refs may be newer than the loaded rows' : null;
   if (!full) {
     busy = true;
@@ -2247,7 +2254,7 @@ async function syncRepo(){
         const plan: { full: string } | SyncPlan = bad.length ? { full: 'unreadable entries' } : planSync(S as SyncFrom, walkRefs(r.refs, hidden, solo), commits, labelRefs(r.refs, hidden, solo));
         if (typeof plan.full !== 'string') plan.allRefs = r.refs;
         if (typeof plan.full === 'string') full = plan.full;
-        else { applySync(plan); fingerprintSeen = r.fingerprintBefore; loadTracking(); loadStashes(); loadPrs({ minAge: 30e3 }); loadWip({ force: true }); }
+        else { applySync(plan); fingerprintSeen = r.fingerprintBefore; loadTracking(); loadStashes(); loadPrs({ minAge: 30e3 }); loadWip({ force: true }); loadRemotes(); }
       }
     } catch (e) {
       full = String(e);
@@ -2255,18 +2262,143 @@ async function syncRepo(){
       busy = false;
     }
   }
+  if (full === BUSY) return;   // a fetch started; it syncs when done
   if (full) await loadRepo(current, { keep: true });
 }
 
 async function poll(){
-  if (!current || busy || moreBusy || document.hidden) return;
+  if (!current || busy || moreBusy || document.hidden || fetchingHere()) return;
   try {
     const fp = await invoke('repo_fingerprint', { path: current.path });
+    if (fp === null) return;   // a fetch is updating the refs
     if (fp !== fingerprintSeen) await syncRepo();
     loadPrs();   // returns at once unless PR_EVERY has passed
     loadWip();   // likewise, unless its interval has passed
   } catch (e) { /* repo moved or deleted; the next manual action will report it */ }
 }
+
+/* ---------- fetch ---------- */
+const BUSY = 'busy';           // backend error while a fetch runs in the repo
+let fetchingPath: string | null = null;   // one fetch at a time, app-wide
+let pendingLoad: { info: RepoInfo; keep: boolean; manual: boolean } | null = null;   // asked for during the fetch
+let fetchErr: string | null = null;   // banner text of the last failed fetch, cleared by the next success
+const fetchingHere = () => !!current && fetchingPath === current.path;
+
+function updateFetchBtn(){
+  if (!NATIVE) return;
+  const b = $('#fetchBtn');
+  const none = !!current && !(S.remotes && S.remotes.size);
+  const here = fetchingHere();
+  b.setAttribute('aria-disabled', String(!current || none || !!fetchingPath));
+  b.setAttribute('aria-busy', String(here));
+  b.classList.toggle('running', here);
+  $('#fetchLabel').textContent = here ? 'Fetching…' : 'Fetch';
+  b.setAttribute('aria-label', here ? 'Fetching' : 'Fetch');
+  b.title = none ? 'No remotes'
+    : fetchingPath ? (here ? 'Fetching all remotes…' : 'A fetch is running in another repository')
+    : 'Fetch all remotes (Ctrl/⌘ Shift F)';
+}
+
+/* "↑2 ↓5" next to the branch name: the checked-out branch against its
+   upstream, from branch_tracking. Hidden when detached, without an upstream
+   or when the upstream is gone. */
+function renderHeadTrack(){
+  const box = $('#headTrack');
+  const hr = NATIVE && S.refs ? S.refs.headRef : null;
+  const t = hr && S.track ? S.track.get(hr.replace(/^refs\/heads\//, '')) : undefined;
+  if (!t || t.gone) { box.hidden = true; box.textContent = ''; box.title = ''; return; }
+  box.hidden = false;
+  box.textContent = `↑${t.ahead} ↓${t.behind}`;
+  box.title = `${t.ahead} ahead, ${t.behind} behind ${t.upstream.replace(/^refs\/(remotes|heads)\//, '')}`;
+}
+
+/* After a sync: a remote added or removed changes how labels are grouped
+   (groupRefs), so reload when the list differs. */
+let remoteSeq = 0;
+async function loadRemotes(){
+  if (!NATIVE || !current) return;
+  const seq = ++remoteSeq, path = current.path;
+  try {
+    const list = await invoke('list_remotes', { path });
+    if (seq !== remoteSeq || !current || current.path !== path) return;
+    const old = S.remotes || new Set<string>();
+    if (list.length !== old.size || list.some(r => !old.has(r))) await loadRepo(current, { keep: true });
+  } catch (e) { /* the next sync asks again */ }
+}
+
+async function runFetch(){
+  if (!NATIVE || !current || fetchingPath || !(S.remotes && S.remotes.size)) return;
+  const info = current, at = new Date();
+  fetchingPath = info.path; updateFetchBtn();
+  let r: FetchResult;
+  try {
+    r = await invoke('fetch', { path: info.path });
+  } catch (e) {
+    const msg = String(e);
+    r = { ok: false, timedOut: false, cancelled: false, durationMs: 0, exitCode: null, command: 'git fetch', stdout: '', stderr: '',
+          summary: msg === BUSY ? 'A fetch is already running in this repository.' : msg };
+  } finally {
+    fetchingPath = null;
+  }
+  logFetch(at, info.name, r);
+  if (!r.ok && !r.cancelled) { showError(r.summary); fetchErr = r.summary; openOut(true); }
+  else if (r.ok) {
+    // Only our own stale fetch error; a load error stays.
+    if (fetchErr !== null && $('#bannerMsg').textContent === fetchErr) hideError();
+    fetchErr = null;
+  }
+  updateFetchBtn();
+  // The user may have switched repositories meanwhile.
+  const p = pendingLoad; pendingLoad = null;
+  if (p && current && p.info.path === info.path) await loadRepo(p.info, { keep: p.keep, manual: p.manual });
+  else if (current && current.path === info.path) await syncRepo();
+}
+
+/* Output drawer: every fetch, newest last, in memory only. Text from git
+   only ever goes through textContent. */
+interface OutEntry { at: Date; repo: string; r: FetchResult }
+const OUT_MAX = 50;
+const outLog: OutEntry[] = [];
+function logFetch(at: Date, repo: string, r: FetchResult){
+  outLog.push({ at, repo, r });
+  if (outLog.length > OUT_MAX) outLog.splice(0, outLog.length - OUT_MAX);
+  renderOut();
+}
+function outStatus(r: FetchResult){
+  return r.ok ? 'done' : r.timedOut ? 'timed out' : r.cancelled ? 'cancelled' : r.exitCode === null ? 'not run' : `exit ${r.exitCode}`;
+}
+function textEl<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string){
+  const e = document.createElement(tag);
+  e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function renderOut(){
+  $('#out').hidden = !outLog.length;
+  const last = outLog[outLog.length - 1];
+  $('#outLast').textContent = last ? `${last.at.toLocaleTimeString()} · ${outStatus(last.r)} · ${last.r.summary}` : '';
+  const list = $('#outList');
+  list.replaceChildren(...outLog.map(({ at, repo, r }) => {
+    const item = textEl('div', `out-item ${r.ok ? 'ok' : r.cancelled ? 'cancel' : 'fail'}`);
+    const head = textEl('div', 'out-head');
+    head.append(textEl('span', 'out-time', at.toLocaleTimeString()), textEl('span', 'out-repo', repo),
+      textEl('span', 'mono out-cmd', r.command), textEl('span', 'out-st', outStatus(r)),
+      textEl('span', 'out-dur', `${(r.durationMs / 1000).toFixed(1)} s`));
+    item.append(head, textEl('div', 'out-sum', r.summary));
+    const text = (r.stderr + (r.stdout ? '\n' + r.stdout : '')).trim();
+    if (text) item.append(textEl('pre', 'mono out-err', text));
+    return item;
+  }));
+  list.scrollTop = list.scrollHeight;
+}
+function openOut(open: boolean){
+  const list = $('#outList');
+  list.hidden = !open;
+  $('#out').classList.toggle('open', open);
+  $('#outBar').setAttribute('aria-expanded', String(open));
+  if (open) list.scrollTop = list.scrollHeight;
+}
+$('#outBar').addEventListener('click', () => openOut(!$('#out').classList.contains('open')));
 
 /* recent menu */
 const menu = $('#recentMenu');
@@ -2313,6 +2445,7 @@ document.addEventListener('keydown', e => {
   if (NATIVE) {
     // Stop the webview from reloading the page (which would drop all state).
     if ((mod && e.key.toLowerCase() === 'r') || e.key === 'F5') { e.preventDefault(); refresh(); return; }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); runFetch(); return; }
     if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); pickRepo(); return; }
   }
   const modalOpen = !$('#modal').hidden;
@@ -2399,7 +2532,10 @@ if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { retu
 if (NATIVE) {
   $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;
+  $('#fetchBtn').hidden = false;
   $('#openBtn').addEventListener('click', pickRepo);
+  // aria-disabled instead of disabled, so the "No remotes" tooltip still shows.
+  $('#fetchBtn').addEventListener('click', () => { if ($('#fetchBtn').getAttribute('aria-disabled') !== 'true') runFetch(); });
   $('#emptyOpen').addEventListener('click', pickRepo);
   $('#refreshBtn').addEventListener('click', refresh);
   $('#repoBtn').addEventListener('click', toggleMenu);
