@@ -72,6 +72,13 @@ run(async () => {
   ok(r3 && r3.querySelector('.more').textContent === '+2', 'custom log: +2 label', r3 && r3.outerHTML.slice(0, 120));
   over(r3.querySelector('.col-ref')); await wait(250);
   ok(pop() && JSON.stringify(names(pop())) === '["main","feature/x","v1"]', 'custom log: pop lists main, feature/x, v1', pop() && JSON.stringify(names(pop())));
+  // Stacked labels are as wide as the widest one; their icons line up on the right.
+  const box = sel => [...pop().querySelectorAll(sel)].map(e => e.getBoundingClientRect());
+  const ws = box('.pill').map(b => Math.round(b.width)), ics = box('.pill .ic').map(b => Math.round(b.right));
+  ok(ws.length === 3 && Math.max(...ws) - Math.min(...ws) <= 1, 'stacked labels share one width', JSON.stringify(ws));
+  ok(Math.max(...ics) - Math.min(...ics) <= 1, 'their icons line up', JSON.stringify(ics));
+  const items = box('.ref-item').map(b => Math.round(b.width));
+  ok(Math.max(...items) - Math.min(...items) <= 1 && Math.abs(items[0] - ws[0]) <= 1, 'backings match the labels', JSON.stringify([items, ws]));
   rclick(pop().querySelectorAll('.pill')[1]);
   const its = [...m.querySelectorAll('.menu-item')].map(b => b.querySelector('.n').textContent + (b.disabled ? '(off)' : '')).join(',');
   ok(!m.hidden && its === 'Hide,Copy branch name', 'second label (branch): menu with Hide enabled', its);

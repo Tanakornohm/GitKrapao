@@ -116,12 +116,14 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .pill .name{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .pill svg{flex:none;display:block}
 .pill .ic{display:inline-flex;gap:3px;flex:none;opacity:.85}
-/* every label of a "+N" commit, over the rows below; padding matches .row .col-ref so the first label does not move */
-.ref-pop{position:absolute;left:0;max-width:var(--refw);z-index:6;display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:calc((var(--rowh) - 22px) / 2) 8px 8px}
+/* every label of a "+N" commit, over the rows below; padding matches .row .col-ref so the first label does not move.
+   Stacked labels stretch to the widest one, icons on the right edge. */
+.ref-pop{position:absolute;left:0;max-width:var(--refw);z-index:6;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:calc((var(--rowh) - 22px) / 2) 8px 8px}
 .ref-pop[hidden]{display:none}
 /* the labels' tint is see-through: an opaque backing keeps the rows below from showing through the text */
 .ref-item{display:flex;max-width:100%;border-radius:4px;background:var(--bg);box-shadow:0 2px 6px var(--shadow)}
-.ref-pop .pill{max-width:100%;cursor:default}
+.ref-pop .pill{flex:1 1 auto;max-width:100%;cursor:default}
+.ref-pop .pill .ic{margin-left:auto}
 .more{flex:none;font-size:11px;height:18px;line-height:18px;padding:0 5px;border-radius:9px;background:var(--panel-2);color:var(--text-2)}
 
 /* detail */
