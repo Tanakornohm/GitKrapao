@@ -241,7 +241,8 @@ fn hook_entries(repo: &Path, entries: &[ConfigEntry], env: &[(&str, &str)]) -> V
             let p = dir.join(&name);
             let body = std::fs::read(&p).ok()?;
             let path = p.to_string_lossy();
-            Some((format!("hook {name} ({path})"), format!("hook\t{path}\t{:x}", Sha256::digest(&body))))
+            // The hash keeps the path as it was, so earlier approvals still hold.
+            Some((format!("hook {name} ({})", shown_path(&path)), format!("hook\t{path}\t{:x}", Sha256::digest(&body))))
         })
         .collect()
 }
@@ -393,6 +394,11 @@ pub(crate) fn sanitize(s: &str, max: usize) -> String {
 
 const MAX_LINES: usize = 20;
 
+/// Windows paths in the dialog with one kind of slash, as git prints them.
+fn shown_path(p: &str) -> String {
+    if cfg!(windows) { p.replace('\\', "/") } else { p.to_string() }
+}
+
 fn trust_text(path: &str, op: &str, new_repo: bool, remotes: &[(String, String)], risky: &[String]) -> String {
     let mut t = String::new();
     if new_repo {
@@ -400,7 +406,7 @@ fn trust_text(path: &str, op: &str, new_repo: bool, remotes: &[(String, String)]
     } else {
         t += &format!("{op} in this repository?\n");
     }
-    t += &format!("{}\n", sanitize(path, 300));
+    t += &format!("{}\n", sanitize(&shown_path(path), 300));
     if new_repo {
         t += "\nFetch contacts:\n";
         for (name, url) in remotes.iter().take(MAX_LINES) {
@@ -418,7 +424,7 @@ fn trust_text(path: &str, op: &str, new_repo: bool, remotes: &[(String, String)]
         if risky.len() > MAX_LINES {
             t += &format!("  and {} more\n", risky.len() - MAX_LINES);
         }
-        t += "\nOnly fetch if you trust this repository.";
+        t += "\nContinue only if you trust this repository.";
     }
     t
 }

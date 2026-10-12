@@ -630,6 +630,8 @@ mod tests {
         assert!(!Path::new(&marker).exists(), "the hook never ran");
         let t = f.trusted.borrow()[0].clone();
         assert!(t.starts_with("Switch branch in this repository?") && t.contains("hook post-checkout"), "{t}");
+        assert!(t.ends_with("Continue only if you trust this repository.") && !t.contains("fetch"), "says what is asked: {t}");
+        assert!(!t.contains('\\'), "paths with one kind of slash: {t}");
 
         f.trust.set(true);
         assert!(f.switch("refs/heads/main", true, &asked).ok);
