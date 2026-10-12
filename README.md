@@ -2,7 +2,7 @@
 
 A GitKraken-style Git history viewer for the desktop. It reads repositories on your machine directly. Its focus is a commit, branch and merge graph that is easy to read and stays smooth even with hundreds of thousands of commits.
 
-> This is a **read-only** version: it never changes anything in your repository. To commit, check out, merge, push or stage, use your editor or a terminal as usual.
+> GitKrapao changes your repository only when you ask it to **Fetch** or **Switch branch**. It never commits, merges your work, rebases, pushes, or deletes branches or tags. Use your editor or a terminal for those, as usual.
 
 Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no framework; esbuild bundles the UI into one file.
 
@@ -19,6 +19,13 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
   - every branch, split into LOCAL and REMOTE, grouped into folders by name, with ahead/behind counts
   - STASHES
   - PULL REQUESTS from Azure DevOps
+- **Fetch:** the toolbar button or `Ctrl Shift F` runs `git fetch --all --prune`, set up so it never deletes or overwrites a local branch or tag. It runs only when you ask; there is no background fetch. Ahead/behind counts for the current branch show next to its name.
+- **Switch branch:** double-click a branch in the left panel or a label in the graph, or right-click it and choose **Switch to**.
+  - A remote branch with no local copy gets a local branch that tracks it.
+  - A local branch that is only behind its remote is fast-forwarded. One with its own commits is left as it is.
+  - Uncommitted changes are never lost. If switching would overwrite them, the app asks whether to stash them first, untracked files included.
+- **Trust check:** a repository's own config or hooks can make git run programs. Before a fetch or switch, the app lists any it finds and asks once; it asks again only when they change.
+- **Output:** a drawer at the bottom with every fetch and switch: the git commands, how long they took and what git printed.
 - **Hide branches and Solo:** hide branches you don't care about, or show only a few. The choice is remembered per repository.
 - **WIP row:** uncommitted files, staged and unstaged, at the top of the graph.
 - **Stashes in the graph:** gray nodes above the commit each stash was made on.
@@ -42,6 +49,7 @@ To see Azure DevOps pull requests, install the [Azure CLI](https://learn.microso
 |---|---|
 | Open a repository | `Ctrl O` |
 | Full reload | `Ctrl R` or `F5` |
+| Fetch | `Ctrl Shift F` |
 | Show/hide the left panel | `Ctrl B` |
 | Move between commits | `↑` `↓` or `J` `K`, `Home` / `End` |
 | Search | `/`, then type; `Enter` jumps to the next match |
@@ -53,9 +61,13 @@ On macOS use `⌘` instead of `Ctrl`.
 
 ## Privacy
 
-- The app reads repositories only through the machine's own `git` command. There is no server, no telemetry, and your code is never sent anywhere.
-- The only outside connection is fetching pull requests with `az`, using the account you signed in with. The app stores no tokens.
-- Diff commands always run with `--no-ext-diff --no-textconv`, so a repository's config can never make the app run other programs.
+- The app works only through the machine's own `git` command. There is no server, no telemetry, and your code is never sent anywhere.
+- It connects outside your machine in two cases:
+  - **Fetch**, only when you press it. It contacts the repository's remotes with your own git credentials and SSH setup.
+  - **Pull requests**, fetched with `az` using the account you signed in with.
+- The app stores no tokens or passwords.
+- Viewing history and diffs always runs with `--no-ext-diff --no-textconv`, so a repository's config cannot make it run other programs.
+- Fetch and switch run whatever git normally runs, such as hooks and filters. When those come from the repository itself, the trust check asks you first. Your answers are kept as SHA-256 hashes in `trust.json` in the app's data folder.
 
 ## Development
 
@@ -110,6 +122,8 @@ src/                    UI source; scripts/web.mjs bundles it into dist/
   app.css
 src-tauri/
   src/lib.rs            Rust commands that run git and hand data to the UI
+  src/fetch.rs          fetch, the trust check and the time limit for git
+  src/switch.rs         switch branch, fast-forward and stash
   tests/fixtures/       real git output used by the unit tests
   tauri.conf.json       app name, window, CSP, bundling
 scripts/
@@ -136,3 +150,5 @@ Never rename the keys or the identifier, or users lose their saved settings.
 | `cargo metadata ... program not found` during `pnpm run dev` | The VS Code terminal still has the PATH from before Rust was installed. Close every VS Code window and reopen it. `scripts/tauri.mjs` already handles the usual case. |
 | `link: extra operand` | MSVC's `link.exe` was not found, so Git's `link` ran instead. Install the "Desktop development with C++" workload. |
 | PRs say "Sign in first" | Run `az login` in a terminal, then press Refresh. |
+| Fetch says "Authentication failed" or times out | The app never shows git's password prompt. For HTTPS, run `git fetch` once in a terminal so Git Credential Manager saves your sign-in. For SSH, start ssh-agent and add your key with `ssh-add`. Then fetch again. |
+| Switch asks to stash | Switching would overwrite uncommitted changes. Choose **Stash and switch** to keep them in a stash (shown under STASHES), or **Cancel** and commit them first. |
