@@ -53,6 +53,13 @@ pub(crate) struct SwitchCtx<'a> {
     pub pid: Option<&'a Mutex<Option<u32>>>,
 }
 
+/// Put before every step, like fetch's --no-auto-maintenance: a merge would
+/// otherwise start gc/maintenance (the pre-auto-gc hook, repacking), and
+/// submodule.recurse would carry the switch into submodules, whose config
+/// and hooks the trust check never sees. These only turn things off, so the
+/// Output drawer shows each step without them.
+const SAFE_CONFIG: &[&str] = &["-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "submodule.recurse=false"];
+
 /// The steps that ran, joined for the Output drawer.
 #[derive(Default)]
 struct Steps {
@@ -65,7 +72,7 @@ struct Steps {
 impl Steps {
     fn run(&mut self, repo: &Path, args: &[&str], cx: &SwitchCtx) -> Result<Limited, String> {
         self.command.push(format!("git {}", args.join(" ")));
-        let r = run_limited(git_env(repo, args, cx.env), cx.limit, MAX_OUTPUT, cx.pid).map_err(spawn_error)?;
+        let r = run_limited(git_env(repo, &[SAFE_CONFIG, args].concat(), cx.env), cx.limit, MAX_OUTPUT, cx.pid).map_err(spawn_error)?;
         self.elapsed += r.elapsed;
         let text = |b: &[u8]| String::from_utf8_lossy(b).trim_end().to_string();
         self.stdout.push(text(&r.stdout));
@@ -486,6 +493,81 @@ mod tests {
         assert!(r.summary.contains("stash@{0}"), "{}", r.summary);
         assert_eq!(f.git(&f.local(), &["show", "stash@{0}:a.txt"]), "my edit");
         assert_eq!(f.git(&f.local(), &["rev-parse", "HEAD"]), f.git(&f.local(), &["rev-parse", "refs/remotes/origin/main"]));
+    }
+
+    // Like fetch's --no-auto-maintenance: no step starts gc/maintenance (a
+    // pre-auto-gc hook, repacking), whatever the repo's config says.
+    #[test]
+    fn runs_no_auto_maintenance() {
+        let f = Fixture::new("gc");
+        let asked = RefCell::new(vec![]);
+        let w = f.dir.join("work");
+        let l = f.local();
+        f.git(&w, &["switch", "-q", "main"]);
+        f.git(&w, &["commit", "-q", "--allow-empty", "-m", "main two"]);
+        f.git(&w, &["push", "-q", "origin", "main"]);
+        f.git(&l, &["fetch", "-q"]);
+        // Four small packs: gc --auto is then due.
+        for n in 0..4 {
+            f.write(&l, "blob", &format!("{n}
+"));
+            let id = f.git(&l, &["hash-object", "-w", "blob"]);
+            f.git(&l, &["update-ref", &format!("refs/tmp/{n}"), &id]);
+            f.git(&l, &["repack", "-q"]);
+        }
+        std::fs::remove_file(l.join("blob")).unwrap();
+        for (k, v) in [("gc.auto", "1"), ("gc.autoPackLimit", "1"), ("gc.autoDetach", "false"),
+                       ("maintenance.autoDetach", "false"), ("submodule.recurse", "true")] {
+            f.git(&l, &["config", k, v]);
+        }
+        let marker = f.dir.join("gc-ran").to_string_lossy().replace('\\', "/");
+        std::fs::write(l.join(".git").join("hooks").join("pre-auto-gc"), format!("#!/bin/sh\ntouch '{marker}'\nexit 1\n")).unwrap();
+
+        let r = f.switch("refs/remotes/origin/main", true, &asked);
+        assert!(r.ok && r.summary == "Fast-forwarded main to origin/main.", "{}: {}", r.summary, r.stderr);
+        assert!(!Path::new(&marker).exists(), "no auto maintenance after the fast-forward");
+        assert!(f.trusted.borrow().iter().any(|t| t.contains("hook pre-auto-gc")), "the hook is part of the trust question");
+        assert_eq!(r.command, "git merge --ff-only refs/remotes/origin/main", "the drawer shows the step without the overrides");
+    }
+
+    // submodule.recurse in the repo's config is overridden: a submodule's
+    // config and hooks are not trust-checked.
+    #[test]
+    fn does_not_recurse_into_submodules() {
+        let f = Fixture::new("sub");
+        let asked = RefCell::new(vec![]);
+        let file = ["-c", "protocol.file.allow=always"];
+        let sub = f.dir.join("subw");
+        std::fs::create_dir_all(&sub).unwrap();
+        f.git(&sub, &["init", "-q", "-b", "main"]);
+        f.git(&sub, &["commit", "-q", "--allow-empty", "-m", "s1"]);
+        let s1 = f.git(&sub, &["rev-parse", "HEAD"]);
+        f.git(&sub, &["commit", "-q", "--allow-empty", "-m", "s2"]);
+        let url = sub.to_string_lossy().replace('\\', "/");
+
+        let w = f.dir.join("work");
+        f.git(&w, &["switch", "-q", "main"]);
+        f.git(&w, &[&file[..], &["submodule", "add", "-q", &url, "sub"]].concat());
+        f.git(&w.join("sub"), &["checkout", "-q", &s1]);
+        f.git(&w, &["commit", "-q", "-am", "add sub"]);
+        f.git(&w, &["switch", "-q", "-c", "next"]);
+        f.git(&w.join("sub"), &["checkout", "-q", "main"]);
+        f.git(&w, &["commit", "-q", "-am", "sub moves"]);
+        f.git(&w, &["push", "-q", "origin", "main", "next"]);
+
+        let l = f.local();
+        f.git(&l, &["pull", "-q", "--ff-only"]);
+        f.git(&l, &[&file[..], &["submodule", "update", "-q", "--init"]].concat());
+        f.git(&l, &["config", "submodule.recurse", "true"]);
+        let marker = f.dir.join("sub-hook-ran").to_string_lossy().replace('\\', "/");
+        std::fs::write(l.join(".git").join("modules").join("sub").join("hooks").join("post-checkout"),
+                       format!("#!/bin/sh\ntouch '{marker}'\n")).unwrap();
+
+        let r = f.switch("refs/remotes/origin/next", true, &asked);
+        assert!(r.ok, "{}: {}", r.summary, r.stderr);
+        assert_eq!(f.head(), "refs/heads/next");
+        assert!(!Path::new(&marker).exists(), "the submodule was not checked out, so its hook never ran");
+        assert_eq!(f.git(&l.join("sub"), &["rev-parse", "HEAD"]), s1, "the submodule stays where it was");
     }
 
     // Changes git can carry over go along; changes it would overwrite stop

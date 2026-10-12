@@ -31,7 +31,7 @@ const FETCH_ARGS: [&str; 6] = ["fetch", "--all", "--prune", "--no-prune-tags", "
 /// so trusting a repo once covers both.
 const TRUST_CONFIG_RE: &str = r"^(core\.(sshcommand|gitproxy|askpass|hookspath|alternaterefscommand|fsmonitor)|credential\..*helper|remote\..*\.(uploadpack|receivepack|vcs|fetch|mirror)|protocol\.(.+\.)?allow|url\..*\.insteadof|hook\..*|filter\..*\.(smudge|clean|process))$";
 /// Hooks fetch (reference-transaction) or a checkout, fast-forward or stash runs.
-const TRUST_HOOKS: [&str; 4] = ["reference-transaction", "post-checkout", "post-merge", "post-index-change"];
+const TRUST_HOOKS: [&str; 5] = ["reference-transaction", "post-checkout", "post-merge", "post-index-change", "pre-auto-gc"];
 
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(export))]
