@@ -1,12 +1,16 @@
 //! Switching branches from the branch panel or a graph label. Never forces:
 //! when git refuses because uncommitted changes would be overwritten, the
 //! user may stash them first (native dialog), and nothing is ever discarded.
+//! Before anything runs, the repo gets the same trust check as fetch: a
+//! checkout can run hooks, filters and an fsmonitor named in its own config.
 //! A remote branch becomes a local branch that tracks it. When a local
 //! branch of that name exists, it is checked out and fast-forwarded to the
 //! remote one only if it is merely behind (`merge --ff-only`); a local branch
 //! with commits of its own is never moved.
 
-use super::fetch::{ask_native, git_env, git_error, sanitize, GitResult, RepoLock, BUSY};
+use super::fetch::{
+    ask_native, assess, git_env, git_error, read_trust_config, sanitize, trust_file, trust_gate, GitResult, RepoLock, BUSY,
+};
 use super::*;
 
 /// A checkout can run LFS filters and a post-checkout hook, so it gets more
@@ -38,6 +42,11 @@ fn parse_target(target: &str, remotes: &[String]) -> Option<Target> {
 pub(crate) struct SwitchCtx<'a> {
     /// Asks whether to stash and switch; true = stash.
     pub ask: &'a dyn Fn(&str) -> bool,
+    /// The trust question shared with fetch; true = go ahead.
+    pub trust: &'a dyn Fn(&str) -> bool,
+    /// trust.json and its lock (shared with fetch).
+    pub store: &'a Path,
+    pub store_lock: &'a Mutex<()>,
     pub limit: Duration,
     /// Extra environment for every git call (tests isolate the config).
     pub env: &'a [(&'a str, &'a str)],
@@ -198,6 +207,13 @@ pub(crate) fn switch_in(top: &str, target: &str, cx: &SwitchCtx) -> GitResult {
     if !valid_branch(repo, name, cx.env) || !ref_exists(repo, target, cx.env) {
         return refused(format!("Branch {target} does not exist."));
     }
+    let entries = match read_trust_config(repo, cx.env) {
+        Ok(e) => e,
+        Err(e) => return refused(format!("Could not check this repository's config, so nothing was switched: {e}")),
+    };
+    if let Err((summary, cancelled)) = trust_gate(top, "Switch branch", &assess(repo, &entries, cx.env), None, cx.store, cx.store_lock, cx.trust) {
+        return GitResult::not_run(format!("git switch ({target})"), summary.replace("Switch branch cancelled", "Switch cancelled"), cancelled);
+    }
     let local_ref = format!("refs/heads/{name}");
     let create = remote.is_some() && !ref_exists(repo, &local_ref, cx.env);
     let current = git_env(repo, &["symbolic-ref", "-q", "HEAD"], cx.env)
@@ -299,11 +315,15 @@ pub(crate) async fn switch_branch(app: tauri::AppHandle, path: String, target: S
     let info = resolve_repo(&state, Path::new(&path))?;
     let dirs = state.dirs.lock().unwrap()[&info.path].clone(); // inserted by resolve_repo
     let lock = RepoLock::take(&state.busy_repos, &dirs.lock_key).ok_or(BUSY)?;
+    let store = trust_file(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _lock = lock;
         let state = app.state::<AppState>();
         let ask = |text: &str| ask_native(&app, "Switch branch: uncommitted changes", "Stash and switch", text);
-        switch_in(&info.path, &target, &SwitchCtx { ask: &ask, limit: LIMIT, env: &[], pid: Some(&state.op_pid) })
+        let trust = |text: &str| ask_native(&app, "Switch branch: trust this repository?", "Switch", text);
+        switch_in(&info.path, &target, &SwitchCtx {
+            ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&state.op_pid),
+        })
     })
     .await
     .map_err(|e| e.to_string())
@@ -312,13 +332,16 @@ pub(crate) async fn switch_branch(app: tauri::AppHandle, path: String, target: S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     /// A bare remote with main and feat, and a clone ("local") to switch in.
-    /// No user config leaks in; the folder is removed on drop.
+    /// No user config leaks in; the folder is removed on drop. Trust
+    /// questions are recorded in `trusted` and answered with `trust`.
     struct Fixture {
         dir: PathBuf,
         global: String,
+        trusted: RefCell<Vec<String>>,
+        trust: Cell<bool>,
     }
 
     impl Fixture {
@@ -328,7 +351,7 @@ mod tests {
             std::fs::create_dir_all(dir.join("work")).unwrap();
             let global = dir.join("empty-global").to_string_lossy().replace('\\', "/");
             std::fs::write(&global, "").unwrap();
-            let f = Fixture { dir, global };
+            let f = Fixture { dir, global, trusted: RefCell::new(vec![]), trust: Cell::new(true) };
             let w = f.dir.join("work");
             f.git(&f.dir, &["init", "-q", "--bare", "-b", "main", "remote.git"]);
             f.git(&w, &["init", "-q", "-b", "main"]);
@@ -370,10 +393,16 @@ mod tests {
         fn switch(&self, target: &str, answer: bool, asked: &RefCell<Vec<String>>) -> GitResult {
             self.switch_with(target, answer, asked, Duration::from_secs(60))
         }
+        fn store(&self) -> PathBuf { self.dir.join("trust.json") }
         fn switch_with(&self, target: &str, answer: bool, asked: &RefCell<Vec<String>>, limit: Duration) -> GitResult {
             let ask = |t: &str| { asked.borrow_mut().push(t.to_string()); answer };
+            let trust = |t: &str| { self.trusted.borrow_mut().push(t.to_string()); self.trust.get() };
             let env = self.env();
-            switch_in(&self.local().to_string_lossy(), target, &SwitchCtx { ask: &ask, limit, env: &env, pid: None })
+            let lock = Mutex::new(());
+            let store = self.store();
+            switch_in(&self.local().to_string_lossy(), target, &SwitchCtx {
+                ask: &ask, trust: &trust, store: &store, store_lock: &lock, limit, env: &env, pid: None,
+            })
         }
     }
 
@@ -497,6 +526,52 @@ mod tests {
         assert!(r.ok, "{}: {}", r.summary, r.stderr);
         assert!(asked.borrow().last().unwrap().contains("u.txt"));
         assert_eq!(f.git(&f.local(), &["show", "stash@{0}^3:u.txt"]), "untracked, mine");
+    }
+
+    // Programs from the repo's own config or hooks (here a post-checkout
+    // hook and a smudge filter) need the same trust as fetch, asked before
+    // anything runs; the answer is shared with fetch through trust.json.
+    #[test]
+    fn asks_before_running_the_repos_programs() {
+        let f = Fixture::new("trust");
+        let asked = RefCell::new(vec![]);
+        let r = f.switch("refs/remotes/origin/feat", true, &asked);
+        assert!(r.ok && f.trusted.borrow().is_empty(), "a repo with nothing to run asks nothing: {}", r.summary);
+
+        let marker = f.dir.join("hook-ran").to_string_lossy().replace('\\', "/");
+        let hook = f.local().join(".git").join("hooks").join("post-checkout");
+        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{marker}'\n")).unwrap();
+        f.trust.set(false);
+        let r = f.switch("refs/heads/main", true, &asked);
+        assert!(!r.ok && r.cancelled && r.summary == "Switch cancelled: the repository was not trusted.", "{}", r.summary);
+        assert_eq!(f.head(), "refs/heads/feat", "nothing switched");
+        assert!(!Path::new(&marker).exists(), "the hook never ran");
+        let t = f.trusted.borrow()[0].clone();
+        assert!(t.starts_with("Switch branch in this repository?") && t.contains("hook post-checkout"), "{t}");
+
+        f.trust.set(true);
+        assert!(f.switch("refs/heads/main", true, &asked).ok);
+        assert!(Path::new(&marker).exists(), "trusted: the hook runs as in a terminal");
+        assert!(f.switch("refs/heads/feat", true, &asked).ok);
+        assert_eq!(f.trusted.borrow().len(), 2, "approved once, not asked again");
+
+        f.git(&f.local(), &["config", "filter.x.smudge", "cat"]);
+        assert!(f.switch("refs/heads/main", true, &asked).ok);
+        assert_eq!(f.trusted.borrow().len(), 3, "new risky config asks again");
+        assert!(f.trusted.borrow()[2].contains("filter.x.smudge = cat"));
+
+        // An approval made by fetch covers switch too: same store, same hash.
+        f.git(&f.local(), &["config", "filter.x.smudge", "cat -"]);
+        let lock = Mutex::new(());
+        let env = f.env();
+        let yes = |_: &str| true;
+        let local = f.local();
+        let r = crate::fetch::fetch_in(&local.to_string_lossy(), &local.join(".git"), &crate::fetch::FetchCtx {
+            store: &f.store(), store_lock: &lock, ask: &yes, limit: Duration::from_secs(60), env: &env, pid: None,
+        });
+        assert!(r.ok, "{}: {}", r.summary, r.stderr);
+        assert!(f.switch("refs/heads/feat", true, &asked).ok);
+        assert_eq!(f.trusted.borrow().len(), 3, "trusted by fetch: switch does not ask");
     }
 
     #[test]

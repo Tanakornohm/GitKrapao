@@ -24,10 +24,14 @@ const MAX_OUTPUT: usize = 1 << 20;
 /// that is not checked.
 const FETCH_ARGS: [&str; 6] = ["fetch", "--all", "--prune", "--no-prune-tags", "--no-auto-maintenance", "--no-recurse-submodules"];
 
-/// Config keys that make fetch run a program, connect somewhere else, or
-/// (fetch/mirror) write outside refs/remotes/. Read from every scope; the
-/// trust check keeps the repo's own (local/worktree) entries.
-const FETCH_CONFIG_RE: &str = r"^(core\.(sshcommand|gitproxy|askpass|hookspath|alternaterefscommand)|credential\..*helper|remote\..*\.(uploadpack|receivepack|vcs|fetch|mirror)|protocol\.(.+\.)?allow|url\..*\.insteadof|hook\..*)$";
+/// Config keys that make fetch or a checkout (switch, fast-forward, stash)
+/// run a program or connect somewhere else, plus fetch/mirror, which could
+/// write outside refs/remotes/. Read from every scope; the trust check keeps
+/// the repo's own (local/worktree) entries. One list for both operations,
+/// so trusting a repo once covers both.
+const TRUST_CONFIG_RE: &str = r"^(core\.(sshcommand|gitproxy|askpass|hookspath|alternaterefscommand|fsmonitor)|credential\..*helper|remote\..*\.(uploadpack|receivepack|vcs|fetch|mirror)|protocol\.(.+\.)?allow|url\..*\.insteadof|hook\..*|filter\..*\.(smudge|clean|process))$";
+/// Hooks fetch (reference-transaction) or a checkout, fast-forward or stash runs.
+const TRUST_HOOKS: [&str; 4] = ["reference-transaction", "post-checkout", "post-merge", "post-index-change"];
 
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(export))]
@@ -103,7 +107,7 @@ pub(crate) fn is_busy(state: &AppState, dirs: &GitDirs) -> bool {
 /* ---------- reading config ---------- */
 
 #[derive(Debug, Clone, PartialEq)]
-struct ConfigEntry {
+pub(crate) struct ConfigEntry {
     /// system, global, local, worktree or command.
     scope: String,
     /// Section and key are lowercase; a subsection keeps its case.
@@ -140,8 +144,8 @@ pub(crate) fn git_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Comma
 
 /// Exit code 1 means no key matched; anything else but 0 (a broken config or
 /// include) refuses the fetch, since the check could not see everything.
-fn read_fetch_config(repo: &Path, env: &[(&str, &str)]) -> Result<Vec<ConfigEntry>, String> {
-    let out = git_env(repo, &["config", "--show-scope", "--includes", "-z", "--get-regexp", FETCH_CONFIG_RE], env)
+pub(crate) fn read_trust_config(repo: &Path, env: &[(&str, &str)]) -> Result<Vec<ConfigEntry>, String> {
+    let out = git_env(repo, &["config", "--show-scope", "--includes", "-z", "--get-regexp", TRUST_CONFIG_RE], env)
         .output()
         .map_err(spawn_error)?;
     match out.status.code() {
@@ -158,12 +162,17 @@ fn is_own(e: &ConfigEntry) -> bool {
     e.scope == "local" || e.scope == "worktree"
 }
 
-/// remote.<name>.fetch / .mirror are checked by `refspec_problem`; every
+/// remote.<name>.fetch / .mirror are checked by `refspec_problem`, and
+/// core.fsmonitor set to true/false is git's own monitor (no program); every
 /// other matched key from the repo's own config needs the user's trust.
 fn risky_entries(entries: &[ConfigEntry]) -> Vec<&ConfigEntry> {
+    let builtin = |e: &ConfigEntry| {
+        e.key == "core.fsmonitor"
+            && matches!(e.value.as_deref().map(|v| v.trim().to_ascii_lowercase()).as_deref(), None | Some("" | "true" | "false" | "yes" | "no" | "on" | "off" | "1" | "0"))
+    };
     entries
         .iter()
-        .filter(|e| is_own(e) && !(e.key.starts_with("remote.") && (e.key.ends_with(".fetch") || e.key.ends_with(".mirror"))))
+        .filter(|e| is_own(e) && !builtin(e) && !(e.key.starts_with("remote.") && (e.key.ends_with(".fetch") || e.key.ends_with(".mirror"))))
         .collect()
 }
 
@@ -212,25 +221,95 @@ fn refspec_problem(entries: &[ConfigEntry], common_dir: &Path) -> Option<String>
     None
 }
 
-/// A reference-transaction hook runs on every ref update, fetch included.
-/// Skipped when core.hooksPath comes from the user's own global or system
-/// config. Returns (dialog line, hash line).
-fn hook_entry(repo: &Path, entries: &[ConfigEntry], env: &[(&str, &str)]) -> Option<(String, String)> {
+/// The TRUST_HOOKS present in the hooks folder (Git for Windows also runs
+/// a .exe). Skipped when core.hooksPath comes from the user's own global or
+/// system config. Returns (dialog line, hash line) per hook.
+fn hook_entries(repo: &Path, entries: &[ConfigEntry], env: &[(&str, &str)]) -> Vec<(String, String)> {
     let hooks_path = entries.iter().filter(|e| e.key == "core.hookspath" && e.scope != "command").last();
     if hooks_path.is_some_and(|e| !is_own(e)) {
-        return None;
+        return vec![];
     }
-    let out = git_env(repo, &["rev-parse", "--path-format=absolute", "--git-path", "hooks"], env).output().ok()?;
+    let Ok(out) = git_env(repo, &["rev-parse", "--path-format=absolute", "--git-path", "hooks"], env).output() else { return vec![] };
     let dir = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
     if !out.status.success() || dir.as_os_str().is_empty() {
-        return None;
+        return vec![];
     }
-    ["reference-transaction", "reference-transaction.exe"].iter().find_map(|name| {
-        let p = dir.join(name);
-        let body = std::fs::read(&p).ok()?;
-        let path = p.to_string_lossy();
-        Some((format!("hook {name} ({path})"), format!("hook\t{path}\t{:x}", Sha256::digest(&body))))
+    TRUST_HOOKS
+        .iter()
+        .flat_map(|h| [h.to_string(), format!("{h}.exe")])
+        .filter_map(|name| {
+            let p = dir.join(&name);
+            let body = std::fs::read(&p).ok()?;
+            let path = p.to_string_lossy();
+            Some((format!("hook {name} ({path})"), format!("hook\t{path}\t{:x}", Sha256::digest(&body))))
+        })
+        .collect()
+}
+
+/// What the repo's own config and hooks would run: dialog lines, and the
+/// hash the user's approval is stored under (None when there is nothing).
+pub(crate) struct Risk {
+    shown: Vec<String>,
+    hash: Option<String>,
+}
+
+pub(crate) fn assess(repo: &Path, entries: &[ConfigEntry], env: &[(&str, &str)]) -> Risk {
+    let mut shown = Vec::new();
+    let mut hashed = Vec::new();
+    for e in risky_entries(entries) {
+        let v = e.value.as_deref();
+        shown.push(match v {
+            Some(v) => format!("{} = {}", sanitize(&e.key, 120), sanitize(v, 200)),
+            None => sanitize(&e.key, 120),
+        });
+        hashed.push(format!("{}\t{}\t{}", e.scope, e.key, v.unwrap_or("")));
+    }
+    for (show, hash) in hook_entries(repo, entries, env) {
+        shown.push(sanitize(&show, 300));
+        hashed.push(hash);
+    }
+    let hash = (!hashed.is_empty()).then(|| trust_hash(&hashed));
+    Risk { shown, hash }
+}
+
+/// The trust gate shared by fetch and switch (one store, one hash per repo).
+/// `op` names the operation in the dialog and in the cancel message.
+/// Fetch passes its remotes: a repo it has never fetched in is asked about
+/// once even with nothing risky, since fetching contacts those remotes.
+/// Err carries the summary and whether the user cancelled.
+pub(crate) fn trust_gate(
+    top: &str,
+    op: &str,
+    risk: &Risk,
+    fetch_remotes: Option<&[(String, String)]>,
+    store: &Path,
+    store_lock: &Mutex<()>,
+    ask: &dyn Fn(&str) -> bool,
+) -> Result<(), (String, bool)> {
+    let key = path_key(Path::new(top));
+    let known = {
+        let _g = store_lock.lock().unwrap();
+        load_store(store).repos.get(&key).cloned().unwrap_or_default()
+    };
+    let new_repo = fetch_remotes.is_some() && !known.fetch;
+    let changed = risk.hash.is_some() && known.config != risk.hash;
+    if !(new_repo || changed) {
+        return Ok(());
+    }
+    // The store lock is not held while the dialog is open.
+    let text = trust_text(top, op, new_repo, fetch_remotes.unwrap_or(&[]), if changed { &risk.shown } else { &[] });
+    if !ask(&text) {
+        return Err((format!("{op} cancelled: the repository was not trusted."), true));
+    }
+    update_store(store, store_lock, &key, |t| {
+        if fetch_remotes.is_some() {
+            t.fetch = true;
+        }
+        if risk.hash.is_some() {
+            t.config = risk.hash.clone();
+        }
     })
+    .map_err(|e| (format!("Could not save your answer: {e}"), false))
 }
 
 /* ---------- trust store ---------- */
@@ -278,7 +357,7 @@ fn update_store(path: &Path, lock: &Mutex<()>, key: &str, f: impl FnOnce(&mut Tr
     save_store(path, &store)
 }
 
-fn trust_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn trust_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("trust.json"))
 }
 
@@ -314,12 +393,12 @@ pub(crate) fn sanitize(s: &str, max: usize) -> String {
 
 const MAX_LINES: usize = 20;
 
-fn trust_text(path: &str, new_repo: bool, remotes: &[(String, String)], risky: &[String]) -> String {
+fn trust_text(path: &str, op: &str, new_repo: bool, remotes: &[(String, String)], risky: &[String]) -> String {
     let mut t = String::new();
     if new_repo {
         t += "GitKrapao has not fetched in this repository before:\n";
     } else {
-        t += "Fetch in this repository?\n";
+        t += &format!("{op} in this repository?\n");
     }
     t += &format!("{}\n", sanitize(path, 300));
     if new_repo {
@@ -332,7 +411,7 @@ fn trust_text(path: &str, new_repo: bool, remotes: &[(String, String)], risky: &
         }
     }
     if !risky.is_empty() {
-        t += "\nIts own config can run programs or change where git connects during a fetch:\n";
+        t += "\nIts own config or hooks can run programs or change where git connects:\n";
         for line in risky.iter().take(MAX_LINES) {
             t += &format!("  {line}\n");
         }
@@ -453,7 +532,7 @@ pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> GitResult
     if remotes.is_empty() {
         return GitResult::refused("This repository has no remotes configured.", false);
     }
-    let entries = match read_fetch_config(repo, cx.env) {
+    let entries = match read_trust_config(repo, cx.env) {
         Ok(e) => e,
         Err(e) => return GitResult::refused(format!("Could not check this repository's config, so it was not fetched: {e}"), false),
     };
@@ -461,42 +540,9 @@ pub(crate) fn fetch_in(top: &str, common_dir: &Path, cx: &FetchCtx) -> GitResult
         return GitResult::refused(why, false);
     }
 
-    let mut shown = Vec::new();
-    let mut hashed = Vec::new();
-    for e in risky_entries(&entries) {
-        let v = e.value.as_deref();
-        shown.push(match v {
-            Some(v) => format!("{} = {}", sanitize(&e.key, 120), sanitize(v, 200)),
-            None => sanitize(&e.key, 120),
-        });
-        hashed.push(format!("{}\t{}\t{}", e.scope, e.key, v.unwrap_or("")));
-    }
-    if let Some((show, hash)) = hook_entry(repo, &entries, cx.env) {
-        shown.push(sanitize(&show, 300));
-        hashed.push(hash);
-    }
-    let hash = (!hashed.is_empty()).then(|| trust_hash(&hashed));
-
-    let key = path_key(repo);
-    let known = {
-        let _g = cx.store_lock.lock().unwrap();
-        load_store(cx.store).repos.get(&key).cloned().unwrap_or_default()
-    };
-    let new_repo = !known.fetch;
-    let changed = hash.is_some() && known.config != hash;
-    if new_repo || changed {
-        // The store lock is not held while the dialog is open.
-        if !(cx.ask)(&trust_text(top, new_repo, &remotes, if changed { &shown } else { &[] })) {
-            return GitResult::refused("Fetch cancelled: the repository was not trusted.", true);
-        }
-        if let Err(e) = update_store(cx.store, cx.store_lock, &key, |t| {
-            t.fetch = true;
-            if hash.is_some() {
-                t.config = hash.clone();
-            }
-        }) {
-            return GitResult::refused(format!("Could not save your answer: {e}"), false);
-        }
+    let risk = assess(repo, &entries, cx.env);
+    if let Err((summary, cancelled)) = trust_gate(top, "Fetch", &risk, Some(&remotes), cx.store, cx.store_lock, cx.ask) {
+        return GitResult::refused(summary, cancelled);
     }
 
     let run = run_limited(git_env(repo, &FETCH_ARGS, cx.env), cx.limit, MAX_OUTPUT, cx.pid);
@@ -704,7 +750,7 @@ mod tests {
         std::fs::write(&extra, "[core]\n\tsshCommand = ssh -o Evil=yes\n").unwrap();
         f.git(&f.local(), &["config", "include.path", "extra.cfg"]);
 
-        let entries = read_fetch_config(&f.local(), &f.env()).unwrap();
+        let entries = read_trust_config(&f.local(), &f.env()).unwrap();
         let ssh = entries.iter().find(|e| e.key == "core.sshcommand").expect("an included key is read");
         assert_eq!(ssh.scope, "local", "an included file takes its includer's scope");
 
@@ -734,6 +780,9 @@ mod tests {
             ("url.https://e.com/.insteadOf", "x"),
             ("remote.origin.uploadpack", "x"),
             ("hook.h.command", "x"),
+            ("filter.x.smudge", "x"),
+            ("filter.x.process", "x"),
+            ("core.fsmonitor", "x"),
         ] {
             f.git(&f.local(), &["config", k, v]);
             let n = Fixture::asks(&asked);
@@ -745,6 +794,21 @@ mod tests {
             assert!(asked.borrow()[n].contains(&shown), "{k} is listed: {}", asked.borrow()[n]);
             f.git(&f.local(), &["config", "--unset", k]);
         }
+
+        // The built-in monitor runs no program of the repo's choosing.
+        f.git(&f.local(), &["config", "core.fsmonitor", "true"]);
+        let n = Fixture::asks(&asked);
+        assert!(f.fetch(true, &asked).ok);
+        assert_eq!(Fixture::asks(&asked), n, "core.fsmonitor=true is not a question");
+        f.git(&f.local(), &["config", "--unset", "core.fsmonitor"]);
+
+        // Hooks a checkout runs are part of the same trust (fetch and switch share it).
+        let post = f.local().join(".git").join("hooks").join("post-checkout");
+        std::fs::write(&post, "#!/bin/sh\nexit 0\n").unwrap();
+        let n = Fixture::asks(&asked);
+        assert!(f.fetch(true, &asked).ok);
+        assert!(asked.borrow()[n].contains("hook post-checkout"), "{}", asked.borrow()[n]);
+        std::fs::remove_file(&post).unwrap();
 
         let hook = f.local().join(".git").join("hooks").join("reference-transaction");
         std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
@@ -859,7 +923,7 @@ mod tests {
         assert_eq!(sanitize("abcdef", 3), "abc…");
         assert_eq!(sanitize("ไทย", 10), "ไทย");
         let lines: Vec<String> = (0..25).map(|i| format!("k{i}")).collect();
-        let t = trust_text("C:/r", false, &[], &lines);
+        let t = trust_text("C:/r", "Fetch", false, &[], &lines);
         assert!(t.contains("k19\n") && !t.contains("k20\n") && t.contains("and 5 more"));
         assert_eq!(trust_hash(&["b".into(), "a".into()]), trust_hash(&["a".into(), "b".into()]));
         // SHA-256, so the stored value survives Rust upgrades (DefaultHasher would not).
