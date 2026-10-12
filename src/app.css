@@ -116,12 +116,14 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .pill .name{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .pill svg{flex:none;display:block}
 .pill .ic{display:inline-flex;gap:3px;flex:none;opacity:.85}
-/* every label of a "+N" commit, over the rows below; padding matches .row .col-ref so the first label does not move */
-.ref-pop{position:absolute;left:0;max-width:var(--refw);z-index:6;display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:calc((var(--rowh) - 22px) / 2) 8px 8px}
+/* every label of a "+N" commit, over the rows below; padding matches .row .col-ref so the first label does not move.
+   Stacked labels stretch to the widest one, icons on the right edge. */
+.ref-pop{position:absolute;left:0;max-width:var(--refw);z-index:6;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:calc((var(--rowh) - 22px) / 2) 8px 8px}
 .ref-pop[hidden]{display:none}
 /* the labels' tint is see-through: an opaque backing keeps the rows below from showing through the text */
 .ref-item{display:flex;max-width:100%;border-radius:4px;background:var(--bg);box-shadow:0 2px 6px var(--shadow)}
-.ref-pop .pill{max-width:100%;cursor:default}
+.ref-pop .pill{flex:1 1 auto;max-width:100%;cursor:default}
+.ref-pop .pill .ic{margin-left:auto}
 .more{flex:none;font-size:11px;height:18px;line-height:18px;padding:0 5px;border-radius:9px;background:var(--panel-2);color:var(--text-2)}
 
 /* detail */
@@ -341,3 +343,30 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .d-file .fp{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr}
 .d-file .dir,.d-file .from{color:var(--text-3)}
 .d-file .ns{flex:none;display:flex;gap:6px;font-variant-numeric:tabular-nums}
+
+/* fetch (toolbar button, ahead/behind, output drawer) */
+.br-row{display:flex;align-items:baseline;gap:6px;min-width:0}
+.ab{font-size:12px;color:var(--text-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+#fetchBtn[aria-disabled="true"]{opacity:.55;cursor:default}
+#fetchBtn[aria-disabled="true"]:hover{border-color:var(--border)}
+#fetchBtn.running{opacity:1}
+#fetchBtn .spin{display:none;width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .8s linear infinite}
+#fetchBtn.running .spin{display:inline-block}
+#fetchBtn.running .fetch-icon{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.out{flex:none;display:flex;flex-direction:column;min-height:0;background:var(--panel);border-top:1px solid var(--border)}
+.out-bar{display:flex;align-items:center;gap:6px;height:26px;padding:0 12px;border:0;background:transparent;font-size:12px;font-weight:500;color:var(--text-2);cursor:pointer;text-align:left;min-width:0}
+.out-bar:hover{background:var(--panel-2)}
+.out-chev{flex:none;transition:transform .15s}
+.out.open .out-chev{transform:rotate(180deg)}
+.out-last{font-weight:400;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.out-list{max-height:30vh;overflow:auto;padding:2px 12px 8px;font-size:12px;border-top:1px solid var(--border)}
+.out-item{padding:6px 0;border-bottom:1px solid var(--border)}
+.out-item:last-child{border-bottom:0}
+.out-head{display:flex;flex-wrap:wrap;gap:2px 12px;color:var(--text-2)}
+.out-st{font-weight:600}
+.out-item.ok .out-st{color:var(--add)}
+.out-item.fail .out-st{color:var(--del)}
+.out-sum{margin-top:2px;color:var(--text)}
+.out-err{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-2);font-size:11.5px}
+@media (prefers-reduced-motion:reduce){#fetchBtn .spin{animation:none}.out-chev{transition:none}}

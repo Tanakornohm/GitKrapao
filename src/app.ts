@@ -1,6 +1,7 @@
 import { Syntax } from './highlight';
 import type { Token } from './highlight';
 import type { CommitDetail } from './bindings/CommitDetail';
+import type { GitResult } from './bindings/GitResult';
 import type { FileChange } from './bindings/FileChange';
 import type { FileDiff } from './bindings/FileDiff';
 import type { DiffKind } from './ipc';
@@ -729,6 +730,7 @@ function updateView(){
   // From the ref snapshot, not the labels: solo can leave HEAD unlabelled.
   const hr = S.refs && S.refs.headRef;
   $('#headName').textContent = hr ? hr.replace(/^refs\/heads\//, '') : S.refs && S.refs.headSha ? 'detached' : headG ? headG.name : '—';
+  renderHeadTrack(); updateFetchBtn();
   $('#sampleBadge').hidden = !S.sample;
   const note = S.note + (S.bad ? `, ${S.bad} unreadable entries skipped` : '')
     + (S.capped ? ', history cut off at 2,000,000 commits' : '');
@@ -1368,7 +1370,7 @@ async function loadTracking(){
     const list = await invoke('branch_tracking', { path });
     if (seq !== trackSeq || !current || current.path !== path) return;
     S.track = new Map(list.map(t => [t.name, t]));
-    renderSide();
+    renderSide(); renderHeadTrack();
   } catch (e) { /* the counts are extras; the panel works without them */ }
 }
 
@@ -1561,7 +1563,7 @@ function wipHead(): number{
 }
 
 async function loadWip({ force = false }: { force?: boolean } = {}){
-  if (!NATIVE || !current || document.hidden || wipBusy) return;
+  if (!NATIVE || !current || document.hidden || wipBusy || opHere()) return;
   if (!force && Date.now() < wipNext) return;
   wipBusy = true;
   const seq = ++wipSeq, path = current.path, t0 = performance.now();
@@ -2021,6 +2023,7 @@ function closeCtx(refocus: boolean){
   ctxBack = null;
 }
 const SOLO_OFF = 'Exit solo to hide branches', HEAD_OFF = 'The checked-out branch is always shown';
+const switchOff = (head: boolean) => head ? 'Already checked out' : opPath ? 'A fetch or switch is running' : '';
 
 sideList.addEventListener('contextmenu', e => {
   const el = (e.target as Element).closest<HTMLElement>('[role="treeitem"]');
@@ -2030,21 +2033,41 @@ sideList.addEventListener('contextmenu', e => {
   const ref = el.dataset.ref, solo = soloList().length > 0;
   const show = !solo && el.classList.contains('is-hidden');
   const entries: CtxEntry[] = [{ label: show ? 'Show' : 'Hide', off: solo ? SOLO_OFF : leaf && !el.dataset.canHide ? HEAD_OFF : '', run: () => toggleHidden(ref) }];
+  if (leaf && NATIVE) entries.unshift({ label: `Switch to ${refLabel(ref)}`, off: switchOff(el.classList.contains('is-head')), run: () => runSwitch(ref) });
   if (leaf) entries.push({ label: 'Copy branch name', run: () => copyText(refLabel(ref)) });
   openCtx(e, entries, el);
 });
-body.addEventListener('contextmenu', e => {
+/* Double-click a branch (panel or graph label) to switch to it. */
+sideList.addEventListener('dblclick', e => {
+  const t = e.target as Element, el = t.closest<HTMLElement>('[role="treeitem"]');
+  if (!NATIVE || !el || el.dataset.kind !== 'branch' || !el.dataset.ref || t.closest('button') || switchOff(el.classList.contains('is-head'))) return;
+  runSwitch(el.dataset.ref);
+});
+body.addEventListener('dblclick', e => {
+  const g = NATIVE ? pillGroup(e) : null;
+  if (g && !switchOff(g.head)) runSwitch(groupRef(g));
+});
+/* The branch a graph label under the event stands for. A label is one ref
+   group of its commit (data-g): one name, local and/or on remotes. */
+function pillGroup(e: Event): RefGroup | null {
   const pill = (e.target as Element).closest<HTMLElement>('.pill'), host = pill && pill.closest<HTMLElement>('.row, .ref-pop');
-  if (!pill || !host || host === wipRow) return;
-  // A label is one ref group of its commit (data-g): one name, local and/or on remotes.
+  if (!pill || !host || host === wipRow) return null;
   const c = S.commits[+host.dataset.i!], g = c && c.groups[+pill.dataset.g! || 0];
-  if (!g || g.kind !== 'branch' || g.name === 'HEAD (detached)') return;
+  return g && g.kind === 'branch' && g.name !== 'HEAD (detached)' ? g : null;
+}
+/* The local branch when there is one; a group without it is on a remote. */
+const groupRef = (g: RefGroup) => g.local ? 'refs/heads/' + g.name : `refs/remotes/${g.remotes[0]}/${g.name}`;
+body.addEventListener('contextmenu', e => {
+  const g = pillGroup(e);
+  if (!g) return;
   const refs = (g.local ? ['refs/heads/' + g.name] : []).concat(g.remotes.map(r => `refs/remotes/${r}/${g.name}`));
   const solo = soloList().length > 0;
-  openCtx(e, [
+  const entries: CtxEntry[] = [
     { label: 'Hide', off: solo ? SOLO_OFF : g.head ? HEAD_OFF : '', run: () => { saveHidden(refs.reduce(toggleIn, hiddenList())); reloadForWalk(); } },
     { label: 'Copy branch name', run: () => copyText(g.local ? g.name : `${g.remotes[0]}/${g.name}`) },
-  ], null);
+  ];
+  if (NATIVE) entries.unshift({ label: `Switch to ${g.local ? g.name : `${g.remotes[0]}/${g.name}`}`, off: switchOff(g.head), run: () => runSwitch(groupRef(g)) });
+  openCtx(e, entries, null);
 });
 ctxMenu.addEventListener('click', e => {
   const b = (e.target as Element).closest<HTMLButtonElement>('.menu-item'); if (!b || b.disabled) return;
@@ -2136,6 +2159,8 @@ function showEmpty(){
 
 async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep?: boolean; manual?: boolean } = {}){
   if (busy) return;
+  // The backend refuses while a fetch or switch changes this repo; runOp loads it when done.
+  if (opPath === info.path) { pendingLoad = { info, keep, manual }; return; }
   busy = true; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
   const hg = hiddenGen, hidden = hiddenList(info.path), solo = soloList(info.path);
@@ -2160,8 +2185,11 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
     hideError();
     loadTracking(); loadStashes(); loadPrs({ force: manual }); loadWip({ force: true });
   } catch (e) {
-    showError(String(e));
-    if (!current) showEmpty();
+    if (String(e) === BUSY) pendingLoad = { info, keep, manual };
+    else {
+      showError(String(e));
+      if (!current) showEmpty();
+    }
   } finally {
     busy = false; document.body.classList.remove('loading');
     // Branches were hidden or shown while this ran with the old list.
@@ -2228,7 +2256,7 @@ async function refresh(){ if (current) await loadRepo(current, { keep: true, man
    merge it in. Anything the plan cannot prove correct falls back to a full
    reload at the same depth. */
 async function syncRepo(){
-  if (!current || busy || moreBusy) return;
+  if (!current || busy || moreBusy || opHere()) return;
   let full: string | null = S.forceFull ? 'refs may be newer than the loaded rows' : null;
   if (!full) {
     busy = true;
@@ -2247,7 +2275,7 @@ async function syncRepo(){
         const plan: { full: string } | SyncPlan = bad.length ? { full: 'unreadable entries' } : planSync(S as SyncFrom, walkRefs(r.refs, hidden, solo), commits, labelRefs(r.refs, hidden, solo));
         if (typeof plan.full !== 'string') plan.allRefs = r.refs;
         if (typeof plan.full === 'string') full = plan.full;
-        else { applySync(plan); fingerprintSeen = r.fingerprintBefore; loadTracking(); loadStashes(); loadPrs({ minAge: 30e3 }); loadWip({ force: true }); }
+        else { applySync(plan); fingerprintSeen = r.fingerprintBefore; loadTracking(); loadStashes(); loadPrs({ minAge: 30e3 }); loadWip({ force: true }); loadRemotes(); }
       }
     } catch (e) {
       full = String(e);
@@ -2255,18 +2283,159 @@ async function syncRepo(){
       busy = false;
     }
   }
+  if (full === BUSY) return;   // a fetch started; it syncs when done
   if (full) await loadRepo(current, { keep: true });
 }
 
 async function poll(){
-  if (!current || busy || moreBusy || document.hidden) return;
+  if (!current || busy || moreBusy || document.hidden || opHere()) return;
   try {
     const fp = await invoke('repo_fingerprint', { path: current.path });
+    if (fp === null) return;   // a fetch or switch is changing the repo
     if (fp !== fingerprintSeen) await syncRepo();
     loadPrs();   // returns at once unless PR_EVERY has passed
     loadWip();   // likewise, unless its interval has passed
   } catch (e) { /* repo moved or deleted; the next manual action will report it */ }
 }
+
+/* ---------- git operations: fetch and switch ---------- */
+const BUSY = 'busy';           // backend error while a fetch or switch runs in the repo
+type OpKind = 'fetch' | 'switch';
+let opPath: string | null = null, opKind: OpKind | null = null;   // one operation at a time, app-wide
+let pendingLoad: { info: RepoInfo; keep: boolean; manual: boolean } | null = null;   // asked for during the operation
+let opErr: string | null = null;   // banner text of the last failed operation, cleared by the next success
+const opHere = () => !!current && opPath === current.path;
+
+function updateFetchBtn(){
+  if (!NATIVE) return;
+  const b = $('#fetchBtn');
+  const none = !!current && !(S.remotes && S.remotes.size);
+  const here = opHere() && opKind === 'fetch';
+  b.setAttribute('aria-disabled', String(!current || none || !!opPath));
+  b.setAttribute('aria-busy', String(here));
+  b.classList.toggle('running', here);
+  $('#fetchLabel').textContent = here ? 'Fetching…' : 'Fetch';
+  b.setAttribute('aria-label', here ? 'Fetching' : 'Fetch');
+  b.title = none ? 'No remotes'
+    : here ? 'Fetching all remotes…'
+    : opPath ? (opHere() ? 'Switching branch…' : 'A fetch or switch is running in another repository')
+    : 'Fetch all remotes (Ctrl/⌘ Shift F)';
+}
+
+/* "↑2 ↓5" next to the branch name: the checked-out branch against its
+   upstream, from branch_tracking. Hidden when detached, without an upstream
+   or when the upstream is gone. */
+function renderHeadTrack(){
+  const box = $('#headTrack');
+  const hr = NATIVE && S.refs ? S.refs.headRef : null;
+  const t = hr && S.track ? S.track.get(hr.replace(/^refs\/heads\//, '')) : undefined;
+  if (!t || t.gone) { box.hidden = true; box.textContent = ''; box.title = ''; return; }
+  box.hidden = false;
+  box.textContent = `↑${t.ahead} ↓${t.behind}`;
+  box.title = `${t.ahead} ahead, ${t.behind} behind ${t.upstream.replace(/^refs\/(remotes|heads)\//, '')}`;
+}
+
+/* After a sync: a remote added or removed changes how labels are grouped
+   (groupRefs), so reload when the list differs. */
+let remoteSeq = 0;
+async function loadRemotes(){
+  if (!NATIVE || !current) return;
+  const seq = ++remoteSeq, path = current.path;
+  try {
+    const list = await invoke('list_remotes', { path });
+    if (seq !== remoteSeq || !current || current.path !== path) return;
+    const old = S.remotes || new Set<string>();
+    if (list.length !== old.size || list.some(r => !old.has(r))) await loadRepo(current, { keep: true });
+  } catch (e) { /* the next sync asks again */ }
+}
+
+/* One fetch or switch. The backend holds the repo's lock meanwhile, so polls,
+   refreshes and loads of this repo wait. The result goes to the Output
+   drawer, a failure also to the banner; then the graph syncs once (or runs
+   the load asked for meanwhile). */
+async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>){
+  if (!NATIVE || !current || opPath) return;
+  const info = current, at = new Date();
+  opPath = info.path; opKind = kind; updateFetchBtn();
+  if (kind === 'switch') { $('#headName').textContent = 'Switching…'; $('#headTrack').hidden = true; }
+  let r: GitResult;
+  try {
+    r = await call(info.path);
+  } catch (e) {
+    const msg = String(e);
+    r = { ok: false, timedOut: false, cancelled: false, durationMs: 0, exitCode: null, command: `git ${kind}`, stdout: '', stderr: '',
+          summary: msg === BUSY ? 'A fetch or branch switch is already running in this repository.' : msg };
+  } finally {
+    opPath = null; opKind = null;
+  }
+  logOp(at, info.name, r);
+  if (!r.ok && !r.cancelled) { showError(r.summary); opErr = r.summary; openOut(true); }
+  else if (r.ok) {
+    // Only our own stale error; a load error stays.
+    if (opErr !== null && $('#bannerMsg').textContent === opErr) hideError();
+    opErr = null;
+  }
+  updateFetchBtn();
+  if (kind === 'switch' && S.commits.length) updateView();   // branch name and ↑↓ until the sync below
+  // The user may have switched repositories meanwhile.
+  const p = pendingLoad; pendingLoad = null;
+  if (p && current && p.info.path === info.path) await loadRepo(p.info, { keep: p.keep, manual: p.manual });
+  else if (current && current.path === info.path) await syncRepo();
+}
+function runFetch(){
+  if (S.remotes && S.remotes.size) runOp('fetch', path => invoke('fetch', { path }));
+}
+/* ref: refs/heads/x, or refs/remotes/<remote>/x (the backend makes a local
+   branch that tracks it, or uses the local branch of that name). */
+function runSwitch(ref: string){
+  runOp('switch', path => invoke('switch_branch', { path, target: ref }));
+}
+
+/* Output drawer: every fetch and switch, newest last, in memory only. Text from git
+   only ever goes through textContent. */
+interface OutEntry { at: Date; repo: string; r: GitResult }
+const OUT_MAX = 50;
+const outLog: OutEntry[] = [];
+function logOp(at: Date, repo: string, r: GitResult){
+  outLog.push({ at, repo, r });
+  if (outLog.length > OUT_MAX) outLog.splice(0, outLog.length - OUT_MAX);
+  renderOut();
+}
+function outStatus(r: GitResult){
+  return r.ok ? 'done' : r.timedOut ? 'timed out' : r.cancelled ? 'cancelled' : r.exitCode === null ? 'not run' : `exit ${r.exitCode}`;
+}
+function textEl<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string){
+  const e = document.createElement(tag);
+  e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function renderOut(){
+  $('#out').hidden = !outLog.length;
+  const last = outLog[outLog.length - 1];
+  $('#outLast').textContent = last ? `${last.at.toLocaleTimeString()} · ${outStatus(last.r)} · ${last.r.summary}` : '';
+  const list = $('#outList');
+  list.replaceChildren(...outLog.map(({ at, repo, r }) => {
+    const item = textEl('div', `out-item ${r.ok ? 'ok' : r.cancelled ? 'cancel' : 'fail'}`);
+    const head = textEl('div', 'out-head');
+    head.append(textEl('span', 'out-time', at.toLocaleTimeString()), textEl('span', 'out-repo', repo),
+      textEl('span', 'mono out-cmd', r.command), textEl('span', 'out-st', outStatus(r)),
+      textEl('span', 'out-dur', `${(r.durationMs / 1000).toFixed(1)} s`));
+    item.append(head, textEl('div', 'out-sum', r.summary));
+    const text = (r.stderr + (r.stdout ? '\n' + r.stdout : '')).trim();
+    if (text) item.append(textEl('pre', 'mono out-err', text));
+    return item;
+  }));
+  list.scrollTop = list.scrollHeight;
+}
+function openOut(open: boolean){
+  const list = $('#outList');
+  list.hidden = !open;
+  $('#out').classList.toggle('open', open);
+  $('#outBar').setAttribute('aria-expanded', String(open));
+  if (open) list.scrollTop = list.scrollHeight;
+}
+$('#outBar').addEventListener('click', () => openOut(!$('#out').classList.contains('open')));
 
 /* recent menu */
 const menu = $('#recentMenu');
@@ -2313,6 +2482,7 @@ document.addEventListener('keydown', e => {
   if (NATIVE) {
     // Stop the webview from reloading the page (which would drop all state).
     if ((mod && e.key.toLowerCase() === 'r') || e.key === 'F5') { e.preventDefault(); refresh(); return; }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); runFetch(); return; }
     if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); pickRepo(); return; }
   }
   const modalOpen = !$('#modal').hidden;
@@ -2399,7 +2569,10 @@ if (__TEST__) window.__gitkrapao = { get S() { return S; }, get PALETTE() { retu
 if (NATIVE) {
   $('#openBtn').hidden = false;
   $('#refreshBtn').hidden = false;
+  $('#fetchBtn').hidden = false;
   $('#openBtn').addEventListener('click', pickRepo);
+  // aria-disabled instead of disabled, so the "No remotes" tooltip still shows.
+  $('#fetchBtn').addEventListener('click', () => { if ($('#fetchBtn').getAttribute('aria-disabled') !== 'true') runFetch(); });
   $('#emptyOpen').addEventListener('click', pickRepo);
   $('#refreshBtn').addEventListener('click', refresh);
   $('#repoBtn').addEventListener('click', toggleMenu);

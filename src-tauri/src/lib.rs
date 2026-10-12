@@ -1,15 +1,18 @@
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{Manager, RunEvent, State};
 use tauri_plugin_dialog::DialogExt;
+
+mod fetch;
+mod switch;
 
 /// Field separator (0x1f) and record separator (0x1e) never appear in normal
 /// commit metadata, so subjects containing "|" or quotes parse safely.
@@ -137,6 +140,9 @@ const MAX_FILES: usize = 3000;
 struct GitDirs {
     git_dir: PathBuf,
     common_dir: PathBuf,
+    /// Canonical common dir: linked worktrees share refs, so they share the
+    /// fetch lock too.
+    lock_key: String,
 }
 
 /// Everything one `git log` run has produced so far.
@@ -171,6 +177,12 @@ struct AppState {
     stream: Mutex<Option<Stream>>,
     next_gen: AtomicU64,
     dirs: Mutex<HashMap<String, GitDirs>>,
+    /// Lock keys (GitDirs::lock_key) of repos with a fetch or switch running.
+    busy_repos: Arc<Mutex<HashSet<String>>>,
+    /// PID of the running fetch or switch, so closing the app can stop it.
+    op_pid: Mutex<Option<u32>>,
+    /// Serializes reads and writes of the trust file.
+    trust_lock: Mutex<()>,
 }
 
 fn git_command(repo: &Path, args: &[&str]) -> Command {
@@ -239,8 +251,16 @@ fn resolve_repo(state: &AppState, path: &Path) -> Result<RepoInfo, String> {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| top.display().to_string());
     let info = RepoInfo { path: top.to_string_lossy().into_owned(), name };
-    state.dirs.lock().unwrap().insert(info.path.clone(), GitDirs { git_dir, common_dir });
+    let lock_key = path_key(&common_dir);
+    state.dirs.lock().unwrap().insert(info.path.clone(), GitDirs { git_dir, common_dir, lock_key });
     Ok(info)
+}
+
+/// One spelling per folder: canonical, and lowercase on Windows where paths
+/// are case-insensitive. Falls back to the path as given.
+fn path_key(p: &Path) -> String {
+    let s = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()).to_string_lossy().into_owned();
+    if cfg!(windows) { s.to_lowercase() } else { s }
 }
 
 fn dirs_for(state: &AppState, path: &str) -> Result<GitDirs, String> {
@@ -457,7 +477,11 @@ async fn pick_repo(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<
         .blocking_pick_folder();
     let Some(folder) = picked else { return Ok(None) };
     let path = folder.into_path().map_err(|e| e.to_string())?;
-    resolve_repo(&state, &path).map(Some)
+    let info = resolve_repo(&state, &path)?;
+    // Picked in the native dialog, so the user chose it: fetch may run there
+    // without asking first (risky config still asks).
+    fetch::allow_repo(&app, &state, &info.path);
+    Ok(Some(info))
 }
 
 #[tauri::command]
@@ -531,6 +555,9 @@ fn rev_args(hidden: &[String], solo: &[String]) -> Result<Vec<String>, String> {
 async fn start_history(path: String, hidden: Vec<String>, solo: Vec<String>, state: State<'_, AppState>) -> Result<StreamInfo, String> {
     let revs = rev_args(&hidden, &solo)?;
     let dirs = dirs_for(&state, &path)?;
+    if fetch::is_busy(&state, &dirs) {
+        return Err(fetch::BUSY.into());
+    }
     let repo = PathBuf::from(&path);
 
     // Fingerprint first. The caller compares it with a fresh one once the
@@ -585,6 +612,9 @@ async fn sync_history(path: String, exclude: Vec<String>, hidden: Vec<String>, s
     }
     let revs = rev_args(&hidden, &solo)?;
     let dirs = dirs_for(&state, &path)?;
+    if fetch::is_busy(&state, &dirs) {
+        return Err(fetch::BUSY.into());
+    }
     let repo = PathBuf::from(&path);
     tauri::async_runtime::spawn_blocking(move || {
         let fingerprint_before = fingerprint(&dirs);
@@ -1161,35 +1191,110 @@ fn find_az() -> Option<PathBuf> {
     dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| p.is_file())
 }
 
-/// Runs a command, giving up after `limit` so a hung CLI never blocks the panel.
-fn output_within(mut cmd: Command, limit: Duration, slow: &str) -> Result<std::process::Output, String> {
-    let name = std::path::Path::new(cmd.get_program()).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Could not run {name}: {e}"))?;
-    let read = |mut r: Box<dyn Read + Send>| std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let _ = r.read_to_end(&mut b);
-        b
-    });
-    let out = read(Box::new(child.stdout.take().unwrap()));
-    let err = read(Box::new(child.stderr.take().unwrap()));
+/// Output of `run_limited`. `status` is None when the process was killed.
+struct Limited {
+    status: Option<ExitStatus>,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    timed_out: bool,
+    elapsed: Duration,
+}
+
+/// Runs a command for at most `limit`. On timeout it kills the whole process
+/// tree: `git` on PATH is often a launcher (Git\cmd\git.exe) whose real git,
+/// ssh and remote helpers would outlive a plain `kill`. Each stream keeps at
+/// most `max` bytes. Once the process is gone, readers get 2 s to finish, so
+/// a grandchild that still holds a pipe open cannot hang the caller.
+/// `pid_slot` holds the PID while it runs (to stop it when the app exits).
+fn run_limited(mut cmd: Command, limit: Duration, max: usize, pid_slot: Option<&Mutex<Option<u32>>>) -> std::io::Result<Limited> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let start = Instant::now();
-    let status = loop {
-        if let Some(s) = child.try_wait().map_err(|e| e.to_string())? {
-            break s;
-        }
-        if start.elapsed() > limit {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(slow.into());
-        }
-        std::thread::sleep(Duration::from_millis(100));
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    if let Some(slot) = pid_slot {
+        *slot.lock().unwrap() = Some(child.id());
+    }
+    let (tx, rx) = mpsc::channel::<()>();
+    let read = |mut r: Box<dyn Read + Send>, tx: mpsc::Sender<()>| {
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let b = buf.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            while let Ok(n) = r.read(&mut chunk) {
+                if n == 0 { break }
+                let mut b = b.lock().unwrap();
+                let room = max.saturating_sub(b.len());
+                b.extend_from_slice(&chunk[..n.min(room)]);
+            }
+            let _ = tx.send(());
+        });
+        buf
     };
-    Ok(std::process::Output { status, stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default() })
+    // Both pipes were requested above.
+    let out = read(Box::new(child.stdout.take().expect("piped stdout")), tx.clone());
+    let err = read(Box::new(child.stderr.take().expect("piped stderr")), tx);
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break Some(s),
+            Ok(None) if start.elapsed() > limit => {
+                timed_out = true;
+                kill_tree(child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => {
+                kill_tree(child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+                if let Some(slot) = pid_slot { *slot.lock().unwrap() = None; }
+                return Err(e);
+            }
+        }
+    };
+    if let Some(slot) = pid_slot {
+        *slot.lock().unwrap() = None;
+    }
+    let elapsed = start.elapsed();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    for _ in 0..2 {
+        if rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).is_err() { break }
+    }
+    let take = |b: Arc<Mutex<Vec<u8>>>| std::mem::take(&mut *b.lock().unwrap());
+    Ok(Limited { status, stdout: take(out), stderr: take(err), timed_out, elapsed })
+}
+
+/// Kills a process and everything it started.
+fn kill_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        // Absolute path, so a taskkill.exe in the repo or on PATH is never run.
+        let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let mut k = Command::new(root.join("System32").join("taskkill.exe"));
+        k.args(["/T", "/F", "/PID", &pid.to_string()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        no_window(&mut k);
+        let _ = k.status();
+    }
+    #[cfg(unix)]
+    {
+        // run_limited put the child in its own process group.
+        let _ = Command::new("kill").args(["-KILL", &format!("-{pid}")]).stdin(Stdio::null()).stderr(Stdio::null()).status();
+    }
+}
+
+/// Runs a command, giving up after `limit` so a hung CLI never blocks the panel.
+fn output_within(cmd: Command, limit: Duration, slow: &str) -> Result<std::process::Output, String> {
+    let name = std::path::Path::new(cmd.get_program()).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let r = run_limited(cmd, limit, usize::MAX, None).map_err(|e| format!("Could not run {name}: {e}"))?;
+    match r.status {
+        Some(status) => Ok(std::process::Output { status, stdout: r.stdout, stderr: r.stderr }),
+        None => Err(slow.into()),
+    }
 }
 
 /// Turns az's output into one actionable line. Takes stdout and stderr
@@ -1322,8 +1427,11 @@ async fn branch_tracking(path: String) -> Result<Vec<Track>, String> {
 }
 
 #[tauri::command]
-async fn repo_fingerprint(path: String, state: State<'_, AppState>) -> Result<String, String> {
-    Ok(fingerprint(&dirs_for(&state, &path)?))
+/// None while a fetch or switch runs in the repo: its refs are changing, so the
+/// caller skips this poll.
+async fn repo_fingerprint(path: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let dirs = dirs_for(&state, &path)?;
+    Ok((!fetch::is_busy(&state, &dirs)).then(|| fingerprint(&dirs)))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1331,14 +1439,36 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint])
+        // The window starts hidden (tauri.conf.json): WebView2 paints white for
+        // a second or more before the page is up, a big white box over a dark
+        // theme. Show it once the page has loaded, or after 5 s whatever happens.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                let _ = webview.window().show();
+            }
+        })
+        .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(5));
+                    let _ = w.show();
+                });
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch])
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
         .run(|app, event| {
             // Don't leave a git process running after the window closes.
             if let RunEvent::Exit = event {
-                if let Some(s) = app.state::<AppState>().stream.lock().unwrap().as_ref() {
+                let state = app.state::<AppState>();
+                if let Some(s) = state.stream.lock().unwrap().as_ref() {
                     s.kill();
+                }
+                let pid = *state.op_pid.lock().unwrap();
+                if let Some(pid) = pid {
+                    kill_tree(pid);
                 }
             }
         });
