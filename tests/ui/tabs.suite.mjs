@@ -7,15 +7,20 @@ export const budget = 120000;
 export const variants = [{}, { name: 'migrate' }, { name: 'gone' }];
 export const setup = v => `<script>
 (() => {
-  const A = 'C:/fake/a', B = 'C:/fake/b', GONE = 'C:/fake/gone';
+  const A = 'C:/fake/a', B = 'C:/fake/b', C = 'C:/fake/c', GONE = 'C:/fake/gone';
   const h = (ch, n) => ch.repeat(39) + n;
   const rec = (hash, parent, subj, t) => hash + '\\x1f' + parent + '\\x1fT\\x1ft@t\\x1f' + t + '\\x1f' + t + '\\x1f\\x1f' + subj + '\\x1e';
   const repos = {
-    [A]: { gen: 1, tip: h('a', '3'), branch: 'refs/heads/a-main',
+    [A]: { gen: 1, tip: h('a', '3'), branch: 'refs/heads/a-main', remotes: ['origin'],
            log: rec(h('a', '3'), h('a', '2'), 'a-three', 1700000300) + rec(h('a', '2'), h('a', '1'), 'a-two', 1700000200) + rec(h('a', '1'), '', 'a-one', 1700000100) },
     [B]: { gen: 2, tip: h('b', '2'), branch: 'refs/heads/b-main',
            log: rec(h('b', '2'), h('b', '1'), 'b-two', 1700000200) + rec(h('b', '1'), '', 'b-one', 1700000100) },
+    // c has a second page, which the view asks for at once (prefetch).
+    [C]: { gen: 3, tip: h('c', '2'), branch: 'refs/heads/c-main', more: true,
+           log: rec(h('c', '2'), h('c', '1'), 'c-two', 1700000200),
+           page2: rec(h('c', '1'), '', 'c-one', 1700000100) },
   };
+  const refsOf = r => ({ refs: [[r.tip, r.branch]], headRef: r.branch, headSha: r.tip });
   const byGen = g => Object.values(repos).find(r => r.gen === g);
   const stashA = { sha: 'e'.repeat(40), parents: [h('a', '1'), 'f'.repeat(40)], name: 'stash@{0}', time: 1700000150, message: 'On a-main: a-stash' };
   // hold[name] makes the matching call wait until release(name, value).
@@ -32,9 +37,19 @@ export const setup = v => `<script>
       if (a.path === B && f.hold.startB) await gate('startB');
       const r = repos[a.path];
       if (!r) throw 'not a repo';
-      return { gen: r.gen, remotes: [], fingerprint: 'fp', refs: { refs: [[r.tip, r.branch]], headRef: r.branch, headSha: r.tip } };
+      return { gen: r.gen, remotes: r.remotes || [], fingerprint: 'fp', refs: refsOf(r) };
     },
-    history_page: a => ({ log: byGen(a.gen).log, more: false, capped: false }),
+    history_page: async a => {
+      const r = byGen(a.gen);
+      if (!a.start) return { log: r.log, more: !!r.more, capped: false };
+      if (f.hold.page) await gate('page');
+      return { log: r.page2 || '', more: false, capped: false };
+    },
+    sync_history: a => ({ fingerprintBefore: 'fp', fingerprintAfter: 'fp', refs: refsOf(repos[a.path]), log: '', over: false }),
+    fetch: async () => {
+      await gate('fetch');
+      return { ok: true, timedOut: false, cancelled: false, durationMs: 1, exitCode: 0, command: 'git fetch', stdout: '', stderr: '', summary: 'Fetched.' };
+    },
     repo_fingerprint: async a => (a.path === A && f.hold.fpA ? gate('fpA') : 'fp'),
     branch_tracking: () => [],
     list_stashes: async a => {
@@ -43,7 +58,7 @@ export const setup = v => `<script>
     },
     pull_requests: () => ({ repo: null, items: [] }),
     work_status: () => ({ files: [], total: 0 }),
-    list_remotes: () => [],
+    list_remotes: a => (repos[a.path] && repos[a.path].remotes) || [],
   };
   window.__TAURI__ = { core: { invoke: (cmd, args) => {
     f.calls.push([cmd, (args || {}).path]);
@@ -129,6 +144,14 @@ run(async () => {
   const n0 = f.calls.length;
   f.release('fpA', 'fp-moved'); await wait(300);
   ok(!callsFor(A, n0).length, 'a poll in flight leaves the tab it left alone', JSON.stringify(callsFor(A, n0)));
+  // While b loads, nothing of a is on screen, and Refresh or a click on b cannot bring a back.
+  ok(!rows().includes('a-') && !side().includes('a-main') && $('#repoName').textContent !== 'a' && !$('#sideList .sb-stash'),
+    'while b loads nothing of a is shown', rows() + ' | ' + side() + ' | ' + $('#repoName').textContent);
+  const startsB = () => callsFor(B).filter(c => c[0] === 'start_history').length, sb = startsB(), n3 = f.calls.length;
+  key('r', { ctrlKey: true }); await wait(100);
+  $('#refreshBtn').click(); await wait(100);
+  await click(tabs()[1], 100);
+  ok(!callsFor(A, n3).length && startsB() === sb, 'while b loads Refresh and a click on b do not load a', JSON.stringify(f.calls.slice(n3)));
   f.release('startB'); await wait(300);
   ok(rows().includes('b-two') && active() === 1, 'b loads after the wait', rows());
   const n1 = f.calls.length;
@@ -207,4 +230,42 @@ run(async () => {
   ok(!$('#tabList').hidden && items.length === 2 && items[1].textContent.includes('b') && items[1].textContent.includes(B), 'tab list shows name and path', $('#tabList').textContent);
   await click(items[1], 300);
   ok($('#tabList').hidden && active() === 1 && rows().includes('b-two'), 'tab list activates the tab', state());
+
+  // A fetch in a: the load of a asked for meanwhile runs when it ends only if a's tab is active.
+  const fetchedA = from => callsFor(A, from).filter(c => c[0] === 'start_history').length;
+  await click(tabs()[0], 300);
+  $('#fetchBtn').click(); await wait(100);
+  ok(f.pending('fetch') === 1, 'a: fetch running', f.pending('fetch'));
+  await click(tabs()[1], 300);
+  await click(tabs()[0], 300);   // a's load waits for the fetch
+  ok(!rows().includes('a-') && !rows().includes('b-') && active() === 0, 'a: nothing of b shown while a waits for its fetch', rows());
+  await click(tabs()[1], 300);
+  const n4 = f.calls.length;
+  f.release('fetch'); await wait(400);
+  ok(active() === 1 && rows().includes('b-two') && !fetchedA(n4), 'a fetch ending under another tab loads nothing there', rows() + ' | ' + JSON.stringify(f.calls.slice(n4)));
+  await click(tabs()[0], 300);
+  ok(rows().includes('a-three'), 'a loads once its fetch is over', rows());
+  $('#fetchBtn').click(); await wait(100);
+  await click(tabs()[1], 300);
+  await click(tabs()[0], 300);
+  const n5 = f.calls.length;
+  f.release('fetch'); await wait(400);
+  ok(active() === 0 && rows().includes('a-three') && fetchedA(n5) === 1, 'a fetch ending in the active tab runs its waiting load', rows());
+
+  // A page of c still on its way when the last tab closes must not land in the empty state.
+  localStorage.setItem('lanes.recent', JSON.stringify([{ path: 'C:/fake/c', name: 'c' }]));
+  key('w', { ctrlKey: true }); await wait(300);
+  key('w', { ctrlKey: true }); await wait(300);
+  ok(!tabs().length && empty(), 'all tabs closed', state());
+  f.hold.page = true;
+  await click($('#emptyRecent .recent-item[data-path="C:/fake/c"]'), 300);
+  // A redraw near the end asks for the next page. A theme change redraws at once (a scroll
+  // waits for an animation frame, which headless Edge does not always deliver).
+  $('#themeBtn').click(); $('#themeBtn').click();
+  const prefetched = await until(() => f.pending('page') === 1);
+  ok(rows().includes('c-two') && prefetched, 'c: second page pending', rows() + ' | ' + f.pending('page') + ' | more=' + window.__gitkrapao.S.more + ' loading=' + document.body.className);
+  key('w', { ctrlKey: true }); await wait(200);
+  f.release('page'); await wait(300);
+  ok(!tabs().length && empty() && !$$('#body .row[data-i]').length && $('#stats').textContent === '' && document.title === 'GitKrapao' && !banner(),
+    'a late page after closing the last tab is dropped', $$('#body .row[data-i]').length + ' rows | ' + $('#stats').textContent + ' | ' + document.title + ' | ' + banner());
 });`;

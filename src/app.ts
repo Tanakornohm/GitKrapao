@@ -2184,10 +2184,11 @@ function showEmpty(){
 
 async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep?: boolean; manual?: boolean } = {}){
   if (busy && busyPath === info.path) return;   // a refresh while this repo loads; another repo supersedes the load below
+  // Another repo: the old one is dropped first (its rows, panel and toolbar, and every follow-up call).
+  if (!current || current.path !== info.path) dropRepo({ empty: false });
   // The backend refuses while a fetch or switch changes this repo; runOp loads it when done.
   if (opPath === info.path) { pendingLoad = { info, keep, manual }; return; }
   const seq = ++loadSeq;
-  if (!current || current.path !== info.path) jumpSeq++;   // a branch jump still paging in the old repo stops
   busy = true; busyPath = info.path; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
   const hg = hiddenGen, hidden = hiddenList(info.path), solo = soloList(info.path);
@@ -2231,11 +2232,14 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
   }
 }
 
-/* Nothing loaded: an empty tab, a tab whose repo failed to open, or no tab at
-   all. A load in flight is dropped (busy too, or polls would stop for good and
-   the same repo could never load again), and with current null nothing polls. */
-function dropRepo(){
-  loadSeq++; openSeq++; jumpSeq++;
+/* Nothing loaded: an empty tab, a tab whose repo failed to open, no tab at all,
+   or (empty: false) the moment before another repo loads, so nothing of the old
+   one stays on screen or can be refreshed, synced or polled under the new tab.
+   A load in flight is dropped (busy too, or polls would stop for good and the
+   same repo could never load again), and so is a page still on its way
+   (streamGen). With current null nothing polls. */
+function dropRepo({ empty = true }: { empty?: boolean } = {}){
+  loadSeq++; openSeq++; jumpSeq++; streamGen = -1;
   busy = false; busyPath = null; document.body.classList.remove('loading');
   current = null; fingerprintSeen = null;
   if (prs.path) { prCache.set(prs.path, prs); prs = noPrs(); }
@@ -2243,9 +2247,9 @@ function dropRepo(){
   S = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
   render(null, null);
   detailFor = null; detail.innerHTML = '<div class="empty">Select a commit to see details</div>';
-  $('#repoName').textContent = '—'; $('#headName').textContent = '—'; $('#stats').textContent = '';
+  $('#repoName').textContent = '—'; $('#headName').textContent = '—'; $('#stats').textContent = empty ? '' : 'Loading history…';
   $('#repoBtn').title = ''; document.title = 'GitKrapao';
-  showEmpty();
+  if (empty) showEmpty();
 }
 
 /* Opening a repo (recent menu, Ctrl/⌘ O, the empty state) fills the active tab,
@@ -2314,9 +2318,9 @@ async function activateTab(i: number): Promise<void>{
   const t = tabs.list[i]; if (!t) return;
   const out = tabs.list[tabs.active];
   if (out === t) {
-    // Already active: only a tab whose repo failed to open (nothing loaded or loading) tries again.
+    // Already active: a tab whose repo is neither loaded nor loading (it failed) tries again.
     scrollTabIntoView();
-    if (t.path && !current && !busy) await showTab(t);
+    if (t.path && !busy && (!current || current.path !== t.path)) await showTab(t);
     return;
   }
   if (out) rememberSel(out);
@@ -2330,6 +2334,8 @@ async function activateTab(i: number): Promise<void>{
 async function showTab(t: Tab){
   scrollTabIntoView();
   if (!t.path) { dropRepo(); return; }
+  // Nothing of the tab left behind stays while open_repo and the load run.
+  if (!current || current.path !== t.path) dropRepo({ empty: false });
   if (t.info) { openSeq++; await loadRepo(t.info); }
   else await openPath(t.path);   // fills t.info
   // Only from rows already loaded: switching never pages further to find it.
@@ -2566,9 +2572,9 @@ async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>){
   }
   updateFetchBtn();
   if (kind === 'switch' && S.commits.length) updateView();   // branch name and ↑↓ until the sync below
-  // The user may have switched repositories meanwhile.
+  // The user may have switched tabs meanwhile: the load asked for runs only if its tab is still active.
   const p = pendingLoad; pendingLoad = null;
-  if (p && current && p.info.path === info.path) await loadRepo(p.info, { keep: p.keep, manual: p.manual });
+  if (p && p.info.path === info.path && tabs.list[tabs.active]?.path === info.path) await loadRepo(p.info, { keep: p.keep, manual: p.manual });
   else if (current && current.path === info.path) await syncRepo();
 }
 function runFetch(){
