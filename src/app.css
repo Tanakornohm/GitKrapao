@@ -82,6 +82,10 @@ button{font:inherit;color:inherit}
 .tab-x svg{display:block}
 .tab-item.on .tab-x,.tab-item:hover .tab-x,.tab-x:focus-visible{visibility:visible}
 .tab-x:hover{background:var(--panel-2);color:var(--text)}
+.tab-x[aria-disabled="true"]{opacity:.4;cursor:default}
+.tab-x[aria-disabled="true"]:hover{background:transparent;color:var(--text-3)}
+.tab-spin,.tab-busy .spin{display:block;width:11px;height:11px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .8s linear infinite}
+.tab-item.running .tab-ic{color:var(--accent)}
 .tabs-btn{flex:none;width:26px;height:24px;margin-left:4px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-2);display:grid;place-items:center;cursor:pointer}
 .tabs-btn:hover,.tabs-btn[aria-expanded="true"]{background:var(--panel-2);color:var(--text)}
 .tabs-btn svg{display:block}
@@ -271,6 +275,10 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .sb-row:hover .sb-eye,.sb-row:hover .sb-solo,[role="treeitem"]:focus-visible > .sb-row .sb-eye,[role="treeitem"]:focus-visible > .sb-row .sb-solo,.sb-eye.on,.sb-solo.on{visibility:visible}
 .sb-solo.on{color:var(--accent)}
 .sb-eye svg,.sb-solo svg{display:block}
+/* a fetch or switch runs in this repo: hide and solo are off */
+.op-running .sb-eye,.op-running .sb-solo{visibility:hidden!important}
+.sb-hidebar .btn:disabled{opacity:.55;cursor:default}
+.sb-hidebar .btn:disabled:hover{border-color:var(--border)}
 .is-solo > .sb-row .sb-name{color:var(--text);font-weight:600}
 .sb-hidebar.solo{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text)}
 .is-hidden > .sb-row .sb-name,.is-hidden > .sb-row .sb-track{opacity:.45}
@@ -292,6 +300,9 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 
 /* file diff view: covers the graph, which stays mounted underneath */
 .center{flex:1;min-width:0;display:flex;position:relative}
+/* a repo waiting for its fetch or switch: a placeholder instead of the graph */
+.tab-busy{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;gap:10px;padding:24px;background:var(--bg);color:var(--text-2);font-size:13px;text-align:center}
+.tab-busy .spin{flex:none;width:14px;height:14px;color:var(--accent)}
 .diff{position:absolute;inset:0;z-index:8;display:flex;flex-direction:column;background:var(--bg);min-width:0}
 .df-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex:none}
 .df-title{display:flex;align-items:center;gap:8px;flex:1;min-width:120px}
@@ -375,8 +386,8 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 /* fetch (toolbar button, ahead/behind, output drawer) */
 .br-row{display:flex;align-items:baseline;gap:6px;min-width:0}
 .ab{font-size:12px;color:var(--text-2);white-space:nowrap;font-variant-numeric:tabular-nums}
-#fetchBtn[aria-disabled="true"]{opacity:.55;cursor:default}
-#fetchBtn[aria-disabled="true"]:hover{border-color:var(--border)}
+#fetchBtn[aria-disabled="true"],#refreshBtn[aria-disabled="true"],#openBtn[aria-disabled="true"]{opacity:.55;cursor:default}
+#fetchBtn[aria-disabled="true"]:hover,#refreshBtn[aria-disabled="true"]:hover,#openBtn[aria-disabled="true"]:hover{border-color:var(--border)}
 #fetchBtn.running{opacity:1}
 #fetchBtn .spin{display:none;width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .8s linear infinite}
 #fetchBtn.running .spin{display:inline-block}
@@ -397,4 +408,4 @@ canvas.graph{position:absolute;z-index:2;pointer-events:none}
 .out-item.fail .out-st{color:var(--del)}
 .out-sum{margin-top:2px;color:var(--text)}
 .out-err{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-2);font-size:11.5px}
-@media (prefers-reduced-motion:reduce){#fetchBtn .spin{animation:none}.out-chev{transition:none}}
+@media (prefers-reduced-motion:reduce){#fetchBtn .spin,.tab-spin,.tab-busy .spin{animation:none}.out-chev{transition:none}}
