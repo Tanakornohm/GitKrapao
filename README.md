@@ -61,7 +61,7 @@ To see Azure DevOps pull requests, install the [Azure CLI](https://learn.microso
 | In the diff view | `J` / `K` (or `]` / `[`) for the next/previous file |
 | Close the diff or details | `Esc` |
 
-On macOS use `⌘` instead of `Ctrl`.
+On macOS use `⌘` instead of `Ctrl`, except for `Ctrl Tab` / `Ctrl Shift Tab`, which stay `Ctrl`.
 
 ## Privacy
 
