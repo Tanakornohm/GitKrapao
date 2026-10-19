@@ -15,6 +15,7 @@ Built with Tauri 2 (Rust) and TypeScript (strict) with plain HTML/CSS and no fra
 
 - **History graph:** each branch gets its own lane and color, merges are drawn, and branches and tags are labeled. Pages load on demand and only the visible part is drawn, so large repositories stay smooth.
 - **Auto-refresh:** checks every 3 seconds. After a commit, fetch, checkout or rebase, only what changed is loaded.
+- **Repository tabs:** open several repositories as tabs, switch with `Ctrl Tab` or `Ctrl 1`–`9`, open one with `Ctrl T` and close with `Ctrl W`. Open tabs are restored on the next start. Only the active tab is loaded and refreshed. A fetch or switch in one tab leaves the other tabs free, up to 3 at a time.
 - **Left panel:**
   - every branch, split into LOCAL and REMOTE, grouped into folders by name, with ahead/behind counts
   - STASHES
@@ -48,6 +49,9 @@ To see Azure DevOps pull requests, install the [Azure CLI](https://learn.microso
 | Action | Keys |
 |---|---|
 | Open a repository | `Ctrl O` |
+| New tab / close tab | `Ctrl T` / `Ctrl W` |
+| Next / previous tab | `Ctrl Tab` / `Ctrl Shift Tab` |
+| Go to tab 1–8 / the last tab | `Ctrl 1`–`8` / `Ctrl 9` |
 | Full reload | `Ctrl R` or `F5` |
 | Fetch | `Ctrl Shift F` |
 | Show/hide the left panel | `Ctrl B` |
@@ -57,7 +61,7 @@ To see Azure DevOps pull requests, install the [Azure CLI](https://learn.microso
 | In the diff view | `J` / `K` (or `]` / `[`) for the next/previous file |
 | Close the diff or details | `Esc` |
 
-On macOS use `⌘` instead of `Ctrl`.
+On macOS use `⌘` instead of `Ctrl`, except for `Ctrl Tab` / `Ctrl Shift Tab`, which stay `Ctrl`.
 
 ## Privacy
 

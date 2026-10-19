@@ -80,28 +80,77 @@ fn command_text() -> String {
 
 /* ---------- lock ---------- */
 
+/// One running fetch or switch: what it is, which repo (for dialogs), and the
+/// slot its git process publishes its PID into (so closing the app can stop it).
+pub(crate) struct RunningOp {
+    /// "Fetch" or "Switch branch".
+    pub kind: &'static str,
+    pub name: String,
+    pub pid: Arc<Mutex<Option<u32>>>,
+}
+
+/// Running operations by `GitDirs::lock_key`: at most one per repo, any number
+/// across repos.
+pub(crate) type OpRegistry = Arc<Mutex<HashMap<String, RunningOp>>>;
+
 /// Marks a repo as busy (fetch or switch); dropping it (also on a panic) frees the repo.
 pub(crate) struct RepoLock {
-    set: Arc<Mutex<HashSet<String>>>,
+    reg: OpRegistry,
     key: String,
+    pid: Arc<Mutex<Option<u32>>>,
 }
 
 impl RepoLock {
-    pub(crate) fn take(set: &Arc<Mutex<HashSet<String>>>, key: &str) -> Option<Self> {
-        set.lock().unwrap().insert(key.to_string()).then(|| RepoLock { set: set.clone(), key: key.to_string() })
+    pub(crate) fn take(reg: &OpRegistry, key: &str, kind: &'static str, name: &str) -> Option<Self> {
+        use std::collections::hash_map::Entry;
+        let pid = Arc::new(Mutex::new(None));
+        match reg.lock().unwrap_or_else(|e| e.into_inner()).entry(key.to_string()) {
+            Entry::Occupied(_) => None,
+            Entry::Vacant(v) => {
+                v.insert(RunningOp { kind, name: name.to_string(), pid: pid.clone() });
+                Some(RepoLock { reg: reg.clone(), key: key.to_string(), pid })
+            }
+        }
+    }
+
+    /// The slot to hand to `FetchCtx.pid` / `SwitchCtx.pid`.
+    pub(crate) fn pid(&self) -> Arc<Mutex<Option<u32>>> {
+        self.pid.clone()
     }
 }
 
 impl Drop for RepoLock {
     fn drop(&mut self) {
-        // A poisoned lock still holds the set; never leave the repo marked.
-        let mut set = self.set.lock().unwrap_or_else(|e| e.into_inner());
-        set.remove(&self.key);
+        // A poisoned lock still holds the map; never leave the repo marked.
+        self.reg.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.key);
     }
 }
 
 pub(crate) fn is_busy(state: &AppState, dirs: &GitDirs) -> bool {
-    state.busy_repos.lock().unwrap().contains(&dirs.lock_key)
+    state.busy_repos.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&dirs.lock_key)
+}
+
+/// PIDs of every git process a running fetch or switch has started.
+pub(crate) fn running_pids(reg: &OpRegistry) -> Vec<u32> {
+    let ops = reg.lock().unwrap_or_else(|e| e.into_inner());
+    ops.values().filter_map(|op| *op.pid.lock().unwrap_or_else(|e| e.into_inner())).collect()
+}
+
+/// Body text for the "close now?" dialog, or None when nothing is running.
+pub(crate) fn close_warning(reg: &OpRegistry) -> Option<String> {
+    let ops = reg.lock().unwrap_or_else(|e| e.into_inner());
+    let mut lines: Vec<String> = ops.values().map(|op| format!("{} — {}", op.kind, op.name)).collect();
+    if lines.is_empty() {
+        return None;
+    }
+    lines.sort();
+    Some(format!(
+        "{}
+
+Closing now stops them. A branch switch that is stopped can leave the working tree half updated; check git status in that repository afterwards.",
+        lines.join("
+")
+    ))
 }
 
 /* ---------- reading config ---------- */
@@ -597,16 +646,18 @@ pub(crate) async fn fetch(app: tauri::AppHandle, path: String, state: State<'_, 
     // Resolved here rather than trusting the path string as given.
     let info = resolve_repo(&state, Path::new(&path))?;
     let dirs = state.dirs.lock().unwrap()[&info.path].clone(); // inserted by resolve_repo
-    let lock = RepoLock::take(&state.busy_repos, &dirs.lock_key).ok_or(BUSY)?;
+    let lock = RepoLock::take(&state.busy_repos, &dirs.lock_key, "Fetch", &info.name).ok_or(BUSY)?;
     let store = trust_file(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let pid = lock.pid();
         let _lock = lock;
         let state = app.state::<AppState>();
-        let ask = |text: &str| ask_native(&app, "Fetch: trust this repository?", "Fetch", text);
+        let title = format!("Fetch — {}: trust this repository?", info.name);
+        let ask = |text: &str| ask_native(&app, &title, "Fetch", text);
         fetch_in(
             &info.path,
             &dirs.common_dir,
-            &FetchCtx { store: &store, store_lock: &state.trust_lock, ask: &ask, limit: LIMIT, env: &[], pid: Some(&state.op_pid) },
+            &FetchCtx { store: &store, store_lock: &state.trust_lock, ask: &ask, limit: LIMIT, env: &[], pid: Some(&*pid) },
         )
     })
     .await
@@ -902,13 +953,30 @@ mod tests {
     }
 
     #[test]
-    fn lock_is_per_repo() {
-        let set = Arc::new(Mutex::new(HashSet::new()));
-        let a = RepoLock::take(&set, "a").unwrap();
-        assert!(RepoLock::take(&set, "a").is_none(), "a second fetch is busy");
-        assert!(RepoLock::take(&set, "b").is_some());
+    fn registry_tracks_each_running_op() {
+        let reg: OpRegistry = Arc::default();
+        let a = RepoLock::take(&reg, "a", "Fetch", "alpha").unwrap();
+        assert!(RepoLock::take(&reg, "a", "Switch branch", "alpha").is_none(), "one op per repo");
+        let b = RepoLock::take(&reg, "b", "Switch branch", "beta").unwrap();
+        *a.pid().lock().unwrap() = Some(11);
+        *b.pid().lock().unwrap() = Some(22);
+        let mut pids = running_pids(&reg);
+        pids.sort();
+        assert_eq!(pids, vec![11, 22]);
         drop(a);
-        assert!(RepoLock::take(&set, "a").is_some());
+        assert_eq!(running_pids(&reg), vec![22]);
+        assert!(RepoLock::take(&reg, "a", "Fetch", "alpha").is_some());
+    }
+
+    #[test]
+    fn close_warning_lists_ops_by_repo() {
+        let reg: OpRegistry = Arc::default();
+        assert_eq!(close_warning(&reg), None);
+        let _a = RepoLock::take(&reg, "a", "Fetch", "alpha").unwrap(); // no PID yet: still listed
+        let _b = RepoLock::take(&reg, "b", "Switch branch", "beta").unwrap();
+        let w = close_warning(&reg).unwrap();
+        assert!(w.contains("Fetch — alpha") && w.contains("Switch branch — beta"));
+        assert!(w.contains("half updated"));
     }
 
     #[test]

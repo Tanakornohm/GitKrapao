@@ -13,7 +13,7 @@ export const setup = () => `<script>
   const log = rec(C, B, 1700000300, 'feat work') + rec(A, B, 1700000200, 'main work') + rec(B, '', 1700000000, 'root');
   const f = window.__fake = { calls: [], args: [], switch: null };
   const answers = {
-    open_repo: a => ({ path: a.path, name: 'demo' }),
+    open_repo: a => ({ path: a.path, name: 'demo', lockKey: a.path }),
     start_history: () => ({ gen: 1, remotes: ['origin'], fingerprint: 'fp', refs }),
     history_page: () => ({ log, more: false, capped: false }),
     repo_fingerprint: () => 'fp',
@@ -23,6 +23,7 @@ export const setup = () => `<script>
     work_status: () => ({ files: [], total: 0 }),
     sync_history: () => ({ fingerprintBefore: 'fp', fingerprintAfter: 'fp', refs, log: '', over: false }),
     list_remotes: () => ['origin'],
+    stop_history: () => null,
     commit_detail: () => ({ body: 'x', files: [], totalFiles: 0, add: 0, del: 0 }),
     switch_branch: () => new Promise(res => { f.switch = res; }),
   };

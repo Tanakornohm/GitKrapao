@@ -321,15 +321,18 @@ pub(crate) fn switch_in(top: &str, target: &str, cx: &SwitchCtx) -> GitResult {
 pub(crate) async fn switch_branch(app: tauri::AppHandle, path: String, target: String, state: State<'_, AppState>) -> Result<GitResult, String> {
     let info = resolve_repo(&state, Path::new(&path))?;
     let dirs = state.dirs.lock().unwrap()[&info.path].clone(); // inserted by resolve_repo
-    let lock = RepoLock::take(&state.busy_repos, &dirs.lock_key).ok_or(BUSY)?;
+    let lock = RepoLock::take(&state.busy_repos, &dirs.lock_key, "Switch branch", &info.name).ok_or(BUSY)?;
     let store = trust_file(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let pid = lock.pid();
         let _lock = lock;
         let state = app.state::<AppState>();
-        let ask = |text: &str| ask_native(&app, "Switch branch: uncommitted changes", "Stash and switch", text);
-        let trust = |text: &str| ask_native(&app, "Switch branch: trust this repository?", "Switch", text);
+        let ask_title = format!("Switch branch — {}: uncommitted changes", info.name);
+        let trust_title = format!("Switch branch — {}: trust this repository?", info.name);
+        let ask = |text: &str| ask_native(&app, &ask_title, "Stash and switch", text);
+        let trust = |text: &str| ask_native(&app, &trust_title, "Switch", text);
         switch_in(&info.path, &target, &SwitchCtx {
-            ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&state.op_pid),
+            ask: &ask, trust: &trust, store: &store, store_lock: &state.trust_lock, limit: LIMIT, env: &[], pid: Some(&*pid),
         })
     })
     .await
