@@ -1818,34 +1818,43 @@ function refreshCard(){
 type PrItem = PullRequest & { card: 'pr'; key: string };
 interface PrState { path: string | null; state: 'idle' | 'loading' | 'ok' | 'none' | 'error'; items: PrItem[]; repo: string | null; error: string; at: number }
 let prs: PrState = { path: null, state: 'idle', items: [], repo: null, error: '', at: 0 };
-let prSeq = 0;
-const prCache = new Map<string, PrState>();   // the list of every other repo seen, so going back does not run az again
-function forgetPrs(path: string): void { prCache.delete(path); }   // a repo that is no longer open
+const prSeq = new Map<string, number>();   // per repo, so a request for one repo never cancels another's
+const prCache = new Map<string, PrState>();   // every repo seen, a list still loading included, so going back does not run az again
+function forgetPrs(path: string): void { prCache.delete(path); }   // a repo that is no longer open (prSeq stays: numbers must not repeat)
 const PR_EVERY = 5 * 60e3;   // pull requests change on the server; ask again this often
 /* minAge: skip if the list is newer than this. A sync (commit, fetch, a new
-   remote URL) asks sooner than the timer, a manual refresh (force) always. */
+   remote URL) asks sooner than the timer, a manual refresh (force) always.
+   An answer for a repo that is no longer the current one goes to that repo's
+   cache entry only (prs and the panel belong to the current repo). */
 async function loadPrs({ force = false, minAge = PR_EVERY }: { force?: boolean; minAge?: number } = {}){
   if (!NATIVE || !current) return;
   const path = current.path;
   const switched = prs.path !== path;
   if (switched) {
-    // A list still loading has nothing to keep (its answer is dropped below): the next visit asks again.
-    if (prs.path && prs.state !== 'loading') prCache.set(prs.path, prs);
+    if (prs.path) prCache.set(prs.path, prs);
     prs = prCache.get(path) ?? { path, state: 'loading', items: [], repo: null, error: '', at: 0 };
   }
   if (!force && Date.now() - prs.at < minAge) { if (switched) renderSide(); return; }
-  const seq = ++prSeq;
+  const seq = (prSeq.get(path) ?? 0) + 1;
+  prSeq.set(path, seq);
   prs.at = Date.now();
   if (prs.state === 'loading') renderSide();
+  // Where this repo's list lives now; undefined once forgetPrs dropped it.
+  const entry = () => prs.path === path ? prs : prCache.get(path);
+  const put = (next: PrState) => { if (prs.path === path) prs = next; else prCache.set(path, next); };
   try {
     const r = await invoke('pull_requests', { path });
-    if (seq !== prSeq || prs.path !== path) return;
-    prs = { ...prs, state: r.repo ? 'ok' : 'none', repo: r.repo, error: '',
-            items: r.items.map(p => ({ ...p, card: 'pr' as const, key: 'PR:' + p.id })) };
+    const now = entry();
+    if (seq !== prSeq.get(path) || !now) return;
+    put({ ...now, state: r.repo ? 'ok' : 'none', repo: r.repo, error: '',
+          items: r.items.map(p => ({ ...p, card: 'pr' as const, key: 'PR:' + p.id })) });
+    if (prs.path !== path) return;
     refreshCard();
   } catch (e) {
-    if (seq !== prSeq || prs.path !== path) return;
-    prs = { ...prs, state: 'error', error: String(e) };   // keep the last list on screen
+    const now = entry();
+    if (seq !== prSeq.get(path) || !now) return;
+    put({ ...now, state: 'error', error: String(e) });   // keep the last list on screen
+    if (prs.path !== path) return;
   }
   renderSide();
 }
