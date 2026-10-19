@@ -24,7 +24,7 @@ export const setup = v => `<script>
   const stashA = { sha: 'e'.repeat(40), parents: [h('a', '1'), 'f'.repeat(40)], name: 'stash@{0}', time: 1700000150, message: 'On a-main: a-stash' };
   // hold[name] makes the matching call wait until release(name, value).
   // Like the backend, every start_history gets a new gen; stops records each stop_history gen.
-  const f = window.__fake = { calls: [], hold: {}, wait: {}, variant: '${v.name || ''}', gen: 0, gens: {}, genOf: {}, stops: [] };
+  const f = window.__fake = { calls: [], hold: {}, wait: {}, variant: '${v.name || ''}', gen: 0, gens: {}, genOf: {}, stops: [], fail: {}, wipB: false };
   const byGen = g => f.gens[g];
   const gate = name => new Promise(res => (f.wait[name] = f.wait[name] || []).push(res));
   f.release = (name, value) => { f.hold[name] = false; (f.wait[name] || []).splice(0).forEach(r => r(value)); };
@@ -38,6 +38,7 @@ export const setup = v => `<script>
       if (a.path === B && f.hold.startB) await gate('startB');
       const r = repos[a.path];
       if (!r) throw 'not a repo';
+      if (f.fail[a.path]) throw f.fail[a.path];
       const gen = ++f.gen; f.gens[gen] = r; f.genOf[a.path] = gen;
       return { gen, remotes: r.remotes || [], fingerprint: 'fp', refs: refsOf(r) };
     },
@@ -59,7 +60,10 @@ export const setup = v => `<script>
       return a.path === A ? [stashA] : [];
     },
     pull_requests: () => ({ repo: null, items: [] }),
-    work_status: () => ({ files: [], total: 0 }),
+    work_status: async a => {
+      if (a.path === A && f.hold.wipA) await gate('wipA');
+      return a.path === B && f.wipB ? { files: [{ path: 'b.txt', oldPath: null, staged: '', unstaged: 'M', conflict: false }], total: 1 } : { files: [], total: 0 };
+    },
     stop_history: a => { f.stops.push(a.gen); return null; },
     list_remotes: a => (repos[a.path] && repos[a.path].remotes) || [],
   };
@@ -103,6 +107,8 @@ run(async () => {
     ok(banner().includes('not inside a Git repository') && empty() && !log.some(l => l.startsWith('ERR')),
       'missing repo tab', banner() + ' | empty=' + empty() + ' | ' + log.join(';'));
     ok(!callsFor(A).length, 'missing repo tab: a not touched at boot', JSON.stringify(f.calls));
+    key('t', { ctrlKey: true }); await wait(100);
+    ok(active() === 2 && empty() && !banner(), 'missing repo tab: the banner goes with Ctrl+T', state() + ' | ' + banner());
     await click(tabs()[1], 300);
     ok(active() === 1 && rows().includes('a-three') && !empty() && !banner(), 'missing repo tab: clicking tab 2 loads a', state() + ' | ' + rows() + ' | ' + banner());
     return;
@@ -275,4 +281,34 @@ run(async () => {
   f.release('page'); await wait(300);
   ok(!tabs().length && empty() && !$$('#body .row[data-i]').length && $('#stats').textContent === '' && document.title === 'GitKrapao' && !banner(),
     'a late page after closing the last tab is dropped', $$('#body .row[data-i]').length + ' rows | ' + $('#stats').textContent + ' | ' + document.title + ' | ' + banner());
+
+  // WIP polls are per repo: a's work_status still on its way does not hold back b's.
+  seedRecent();
+  key('t', { ctrlKey: true }); await wait(100);   // the empty state lists the recents seeded just now
+  await click($('#emptyRecent .recent-item[data-path="' + A + '"]'), 300);
+  seedRecent();
+  key('t', { ctrlKey: true }); await wait(100);
+  await click($('#emptyRecent .recent-item[data-path="' + B + '"]'), 300);
+  ok(names().join() === 'a,b' && active() === 1, 'wip: tabs a, b', state());
+  f.hold.wipA = true;
+  await click(tabs()[0], 300);
+  ok(f.pending('wipA') === 1, 'wip: a status on its way', f.pending('wipA'));
+  f.wipB = true;
+  await click(tabs()[1], 300);
+  const wipShown = () => !!$('#body .wip-row') && !$('#body .wip-row').hidden;
+  ok(rows().includes('b-two') && wipShown(), 'wip: b shows its WIP row while a status is still on its way', rows() + ' | ' + JSON.stringify(f.calls.filter(c => c[0] === 'work_status')));
+  f.release('wipA'); await wait(200);
+  ok(active() === 1 && wipShown() && rows().includes('b-two'), 'wip: the late status of a changes nothing in b', rows());
+  f.wipB = false;
+
+  // A tab whose repo was deleted during the session (open_repo answered before):
+  // the banner says so, nothing stays on screen and the recent list forgets it.
+  await click(tabs()[0], 300);
+  seedRecent();
+  f.fail[B] = 'C:/fake/b is gone';
+  await click(tabs()[1], 300);
+  const recent = () => (JSON.parse(localStorage.getItem('lanes.recent')) || []).map(r => r.path);
+  ok(banner() === 'C:/fake/b is gone' && empty() && !rows().includes('a-') && $('#stats').textContent === '', 'deleted repo: banner, empty state', banner() + ' | ' + rows() + ' | ' + $('#stats').textContent);
+  ok(!recent().includes(B) && recent().includes(A), 'deleted repo: forgotten from recents', localStorage.getItem('lanes.recent'));
+  delete f.fail[B];
 });`;

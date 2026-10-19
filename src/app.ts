@@ -1555,7 +1555,8 @@ async function jumpTo(sha: string, { detail: show = true }: { detail?: boolean }
    tree edits do not touch .git, so the ref fingerprint cannot see them;
    work_status is polled on its own, slower when status is slow. */
 const WIP_EVERY = 4000;
-let wip: { path: string | null; files: WorkFile[]; total: number; sig: string } = { path: null, files: [], total: 0, sig: '' }, wipSeq = 0, wipNext = 0, wipBusy = false;
+let wip: { path: string | null; files: WorkFile[]; total: number; sig: string } = { path: null, files: [], total: 0, sig: '' }, wipSeq = 0, wipNext = 0;
+let wipBusy: string | null = null;   // repo whose work_status is on its way
 let wipSel = false;          // the WIP row is selected (sel is then -1)
 let rowOff = 0;              // px above row 0: ROW_H while the WIP row shows
 const wipRow = document.createElement('div');
@@ -1570,18 +1571,23 @@ function wipHead(): number{
 }
 
 async function loadWip({ force = false }: { force?: boolean } = {}){
-  if (!NATIVE || !current || document.hidden || wipBusy || opHere()) return;
+  // Only a status of this repo still on its way holds this one back: one of the
+  // repo just left must not delay the new tab's WIP row.
+  if (!NATIVE || !current || document.hidden || wipBusy === current.path || opHere()) return;
   if (!force && Date.now() < wipNext) return;
-  wipBusy = true;
   const seq = ++wipSeq, path = current.path, t0 = performance.now();
+  wipBusy = path;
   try {
     const r = await invoke('work_status', { path });
     if (seq === wipSeq && current && current.path === path) applyWip(path, r);
   } catch (e) { /* keep the last state; the next poll tries again */ }
   finally {
-    wipBusy = false;
-    // A slow status (huge work tree) is asked less often.
-    wipNext = Date.now() + Math.max(WIP_EVERY, (performance.now() - t0) * 8);
+    // A newer request (another repo) owns the busy mark and the next time.
+    if (seq === wipSeq) {
+      wipBusy = null;
+      // A slow status (huge work tree) is asked less often.
+      wipNext = Date.now() + Math.max(WIP_EVERY, (performance.now() - t0) * 8);
+    }
   }
 }
 
@@ -2221,6 +2227,7 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
   if (!current || current.path !== info.path) dropRepo({ empty: false });
   const op = ops.get(info.lockKey);
   if (op) { waitForOp(info, op, keep, manual); return; }
+  const placeholder = !tabBusy.hidden;   // the load runOp runs after the repo waited for its operation
   tabBusy.hidden = true;
   const seq = ++loadSeq;
   busy = true; busyPath = info.path; document.body.classList.add('loading');
@@ -2256,10 +2263,16 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
     const op = String(e) === BUSY ? ops.get(info.lockKey) : undefined;
     if (op) waitForOp(info, op, keep, manual);   // an operation started while this was on its way
     else {
+      // The active tab asks for this repo now: never leave another repo's graph
+      // (or the placeholder's "Loading history…") under it. A refresh of a
+      // loaded graph keeps it. dropRepo hides the banner, so it goes first.
+      const drop = !current || current.path !== info.path || placeholder;
+      if (drop) dropRepo();
       // 'busy' with no operation of ours left to run the load later: say so instead of waiting forever.
       showError(String(e) === BUSY ? BUSY_MSG : String(e));
-      // The active tab asks for this repo now: never leave another repo's graph under it.
-      if (!current || current.path !== info.path) dropRepo();
+      // The repo could not be read (deleted or moved meanwhile): forgotten as a
+      // failed open is. Not for 'busy', nor a 'stale' stream (replaced by a newer one).
+      if (drop && String(e) !== BUSY && String(e) !== 'stale') forgetRecent(info.path);
     }
   } finally {
     if (seq === loadSeq) {
@@ -2277,10 +2290,11 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
    A load in flight is dropped (busy too, or polls would stop for good and the
    same repo could never load again), and so is a page still on its way
    (streamGen). With current null nothing polls. Its history stream is
-   stopped. */
+   stopped and its banner hidden. */
 function dropRepo({ empty = true }: { empty?: boolean } = {}){
   loadSeq++; openSeq++; jumpSeq++; streamGen = -1;
   stopHistory();
+  hideError();   // a banner of the repo left behind; a failure of the next one shows after this
   busy = false; busyPath = null; document.body.classList.remove('loading');
   current = null; fingerprintSeen = null;
   if (prs.path) { prCache.set(prs.path, prs); prs = noPrs(); }
@@ -2334,7 +2348,8 @@ async function pickRepo(){
    One repo is loaded at a time, the active tab's; the others are only a
    path and a name (plus, in memory, the last open_repo answer and the
    selected commit). Switching drops the old repo's state and loads the new
-   one; background tabs never call the backend. */
+   one; background tabs never call the backend (a fetch or switch started
+   in one keeps running). */
 let tabs: Tabs = { list: [], active: -1 };   // read from lanes.tabs at boot
 const tabStrip = $('#tabStrip'), tabList = $('#tabList');
 
@@ -2652,11 +2667,17 @@ async function runOp(kind: OpKind, call: (path: string) => Promise<GitResult>){
   updateFetchBtn(); renderTabs();
   if (kind === 'switch' && S.commits.length) updateView();   // branch name and ↑↓ until the sync below
   const p = op.pending, waited = !tabBusy.hidden;
-  if (!p) { await syncRepo(); return; }
-  await loadRepo(p.info, { keep: p.keep, manual: p.manual });
-  // The tab showed the placeholder: bring back its selection, as a tab switch does.
-  const t = tabs.list[tabs.active];
-  if (waited && t) restoreSel(t);
+  if (!p) await syncRepo();
+  else {
+    await loadRepo(p.info, { keep: p.keep, manual: p.manual });
+    // The tab showed the placeholder: bring back its selection, as a tab switch does.
+    const t = tabs.list[tabs.active];
+    if (waited && t) restoreSel(t);
+  }
+  // A successful load (or a sync that reloads) hides the banner: the failure
+  // stays on screen while its repo is active. A failed load's own error wins
+  // (the banner is showing then).
+  if (failed && current?.lockKey === key && $('#banner').hidden) showError(r.summary);
 }
 function runFetch(){
   if (S.remotes && S.remotes.size) runOp('fetch', path => invoke('fetch', { path }));

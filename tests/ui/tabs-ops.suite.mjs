@@ -17,8 +17,8 @@ export const setup = () => `<script>
   // a-wt is a linked worktree of a: another path, the same lock key.
   const repos = { [A]: repo('a', 1, A), [B]: repo('b', 2, B), [C]: repo('c', 3, C), [D]: repo('d', 4, D), [AWT]: repo('f', 5, A, 'a-wt') };
   // fetching[key]: the pending fetch or switch of that lock key; the backend answers 'busy' meanwhile.
-  // Like the backend, every start_history gets a new gen.
-  const f = window.__fake = { calls: [], fetching: {}, hold: {}, wait: {}, gen: 0, gens: {} };
+  // Like the backend, every start_history gets a new gen; fail[path] makes the next loads of path fail.
+  const f = window.__fake = { calls: [], fetching: {}, hold: {}, wait: {}, gen: 0, gens: {}, fail: {} };
   const byGen = g => f.gens[g];
   const keyOf = p => (repos[p] ? repos[p].key : p);
   f.pending = p => (f.fetching[keyOf(p)] ? 1 : 0);
@@ -34,6 +34,7 @@ export const setup = () => `<script>
     start_history: async a => {
       if (f.hold['start:' + a.path]) await gate('start:' + a.path);
       if (f.fetching[keyOf(a.path)]) throw 'busy';
+      if (f.fail[a.path]) throw f.fail[a.path];
       const r = repos[a.path], gen = ++f.gen;
       f.gens[gen] = r;
       return { gen, remotes: ['origin'], fingerprint: 'fp', refs: r.refs };
@@ -186,6 +187,26 @@ run(async () => {
   ok(active() === 2 && rows().includes('c-two') && dot(1) && !spin(1), 'background failure is quiet: b gets the error dot', state() + ' ' + items()[1].outerHTML);
   await click(tabs()[1]);
   ok(!dot(1) && rows().includes('b-two'), 'background failure is quiet: activating b clears the dot', items()[1].outerHTML);
+
+  // A failure in the active tab that showed the placeholder: the load that follows keeps the banner.
+  await fetchHere();
+  await click(tabs()[2]); await click(tabs()[1]);
+  ok(vis('#tabBusy') && f.pending(B) === 1, 'failure after the placeholder: b waits for its fetch', state());
+  f.done(B, res({ ok: false, exitCode: 128, summary: 'Authentication failed for b' })); await wait(400);
+  ok(!vis('#tabBusy') && rows().includes('b-two') && vis('#banner') && $('#bannerMsg').textContent === 'Authentication failed for b',
+    'failure after the placeholder: the banner stays after the load', state() + ' | banner ' + vis('#banner') + ' ' + $('#bannerMsg').textContent);
+  $('#bannerClose').click();
+
+  // The load that runs after the placeholder fails: its error shows and nothing says it is still loading.
+  await fetchHere();
+  await click(tabs()[2]); await click(tabs()[1]);
+  ok(vis('#tabBusy'), 'load fails after the placeholder: b waits', state());
+  f.fail[B] = 'C:/fake/b is gone';
+  f.done(B, res()); await wait(400);
+  ok(!vis('#tabBusy') && vis('#banner') && $('#bannerMsg').textContent === 'C:/fake/b is gone' && $('#stats').textContent === '' && !$$('#body .row[data-i]').length,
+    'load fails after the placeholder: banner, no "Loading history…"', state() + ' | ' + $('#bannerMsg').textContent + ' | stats ' + $('#stats').textContent);
+  delete f.fail[B];
+  $('#bannerClose').click();
 
   // cap of 3
   for (const i of [0, 1, 2]) { await click(tabs()[i]); await fetchHere(); }
