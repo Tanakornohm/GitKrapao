@@ -16,9 +16,10 @@ export const setup = () => `<script>
     log: rec(h(ch, '2'), h(ch, '1'), ch + '-two', 1700000200) + rec(h(ch, '1'), '', ch + '-one', 1700000100) });
   // a-wt is a linked worktree of a: another path, the same lock key.
   const repos = { [A]: repo('a', 1, A), [B]: repo('b', 2, B), [C]: repo('c', 3, C), [D]: repo('d', 4, D), [AWT]: repo('f', 5, A, 'a-wt') };
-  const byGen = g => Object.values(repos).find(r => r.gen === g);
   // fetching[key]: the pending fetch or switch of that lock key; the backend answers 'busy' meanwhile.
-  const f = window.__fake = { calls: [], fetching: {}, hold: {}, wait: {} };
+  // Like the backend, every start_history gets a new gen.
+  const f = window.__fake = { calls: [], fetching: {}, hold: {}, wait: {}, gen: 0, gens: {} };
+  const byGen = g => f.gens[g];
   const keyOf = p => (repos[p] ? repos[p].key : p);
   f.pending = p => (f.fetching[keyOf(p)] ? 1 : 0);
   f.done = (p, r) => { const k = keyOf(p), res = f.fetching[k]; delete f.fetching[k]; if (res) res(r); };
@@ -33,8 +34,9 @@ export const setup = () => `<script>
     start_history: async a => {
       if (f.hold['start:' + a.path]) await gate('start:' + a.path);
       if (f.fetching[keyOf(a.path)]) throw 'busy';
-      const r = repos[a.path];
-      return { gen: r.gen, remotes: ['origin'], fingerprint: 'fp', refs: r.refs };
+      const r = repos[a.path], gen = ++f.gen;
+      f.gens[gen] = r;
+      return { gen, remotes: ['origin'], fingerprint: 'fp', refs: r.refs };
     },
     history_page: a => ({ log: byGen(a.gen).log, more: false, capped: false }),
     sync_history: a => ({ fingerprintBefore: 'fp', fingerprintAfter: 'fp', refs: repos[a.path].refs, log: '', over: false }),
@@ -54,6 +56,7 @@ export const setup = () => `<script>
     pull_requests: () => ({ repo: null, items: [] }),
     work_status: () => ({ files: [], total: 0 }),
     list_remotes: () => ['origin'],
+    stop_history: () => null,
   };
   window.__TAURI__ = { core: { invoke: (cmd, args) => {
     f.calls.push([cmd, (args || {}).path]);

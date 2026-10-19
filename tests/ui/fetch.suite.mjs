@@ -27,6 +27,7 @@ export const setup = v => `<script>
     work_status: () => ({ files: [], total: 0 }),
     sync_history: () => ({ fingerprintBefore: 'fp', fingerprintAfter: 'fp', refs, log: '', over: false }),
     list_remotes: () => f.remotes,
+    stop_history: () => null,
     commit_detail: () => ({ body: 'x', files: [], totalFiles: 0, add: 0, del: 0 }),
     fetch: () => new Promise(res => { f.fetch = res; }),
   };

@@ -23,6 +23,7 @@ export const setup = () => `<script>
     work_status: () => ({ files: [], total: 0 }),
     sync_history: () => ({ fingerprintBefore: 'fp', fingerprintAfter: 'fp', refs, log: '', over: false }),
     list_remotes: () => ['origin'],
+    stop_history: () => null,
     commit_detail: () => ({ body: 'x', files: [], totalFiles: 0, add: 0, del: 0 }),
     switch_branch: () => new Promise(res => { f.switch = res; }),
   };

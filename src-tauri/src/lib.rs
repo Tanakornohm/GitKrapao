@@ -164,13 +164,31 @@ struct Stream {
     gen: u64,
     shared: Shared,
     child: Arc<Mutex<Option<Child>>>,
+    /// Tells `read_log` to stop reading. Killing `git` may hit only a
+    /// launcher (Git for Windows' cmd\git.exe) while the real git keeps
+    /// writing; dropping the pipe then ends it on a broken pipe.
+    stop: Arc<AtomicBool>,
 }
 
 impl Stream {
     fn kill(&self) {
+        self.stop.store(true, Ordering::SeqCst);
         if let Some(c) = self.child.lock().unwrap().as_mut() {
             let _ = c.kill();
         }
+    }
+}
+
+/// Stops and forgets the history stream unless it is newer than `gen`: a stop
+/// sent when the UI left a repo may reach the backend after the next
+/// `start_history`, and must not kill that one.
+fn stop_stream(slot: &Mutex<Option<Stream>>, gen: u64) {
+    let old = {
+        let mut s = slot.lock().unwrap();
+        if s.as_ref().is_some_and(|st| st.gen <= gen) { s.take() } else { None }
+    };
+    if let Some(old) = old {
+        old.kill();
     }
 }
 
@@ -406,6 +424,7 @@ fn read_log(
     mut stderr: std::process::ChildStderr,
     shared: Shared,
     child_slot: Arc<Mutex<Option<Child>>>,
+    stop: Arc<AtomicBool>,
 ) {
     let err_thread = std::thread::spawn(move || {
         let mut s = String::new();
@@ -418,6 +437,7 @@ fn read_log(
     let (mut buf, mut ends, mut rec) = (Vec::new(), Vec::new(), Vec::new());
     let mut total = 0usize;
     let mut capped = false;
+    let mut stopped = false;
     let flush = |buf: &mut Vec<u8>, ends: &mut Vec<usize>| {
         let mut s = lock.lock().unwrap();
         let base = s.buf.len();
@@ -435,6 +455,10 @@ fn read_log(
             Ok(0) | Err(_) => break,
             Ok(_) if rec.last() != Some(&RS) => break, // trailing newline only
             Ok(_) => {
+                if stop.load(Ordering::SeqCst) {
+                    stopped = true;
+                    break;
+                }
                 buf.extend_from_slice(&rec);
                 ends.push(buf.len());
                 total += 1;
@@ -452,13 +476,17 @@ fn read_log(
         }
     }
     flush(&mut buf, &mut ends);
+    // Close the pipe before waiting: after a stop or the cap, a git that kept
+    // running (the kill may have hit only a launcher) would otherwise block
+    // on a full pipe and keep stderr open, so neither wait below would return.
+    drop(reader);
 
     let child = child_slot.lock().unwrap().take();
     let status = child.and_then(|mut c| c.wait().ok());
     let err = err_thread.join().unwrap_or_default();
     let mut s = lock.lock().unwrap();
     s.capped = capped;
-    if !capped && !status.is_some_and(|st| st.success()) {
+    if !capped && !stopped && !status.is_some_and(|st| st.success()) {
         // An empty repository (no commits yet) shows an empty graph.
         let empty = err.contains("bad revision 'HEAD'") || err.contains("ambiguous argument 'HEAD'");
         if !empty && s.ends.is_empty() {
@@ -580,14 +608,20 @@ async fn start_history(path: String, hidden: Vec<String>, solo: Vec<String>, sta
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
 
-    let gen = state.next_gen.fetch_add(1, Ordering::Relaxed) + 1;
     let shared: Shared = Arc::default();
     let slot = Arc::new(Mutex::new(Some(child)));
-    let stream = Stream { gen, shared: shared.clone(), child: slot.clone() };
-    if let Some(old) = state.stream.lock().unwrap().replace(stream) {
+    let stop = Arc::new(AtomicBool::new(false));
+    // The gen is taken under the stream lock, so the slot always holds the
+    // newest stream started (stop_history relies on that).
+    let (gen, old) = {
+        let mut cur = state.stream.lock().unwrap();
+        let gen = state.next_gen.fetch_add(1, Ordering::Relaxed) + 1;
+        (gen, cur.replace(Stream { gen, shared: shared.clone(), child: slot.clone(), stop: stop.clone() }))
+    };
+    if let Some(old) = old {
         old.kill();
     }
-    std::thread::spawn(move || read_log(stdout, stderr, shared, slot));
+    std::thread::spawn(move || read_log(stdout, stderr, shared, slot, stop));
 
     // Both run while git walks the history, so they add no wait of their own.
     let repo2 = repo.clone();
@@ -601,6 +635,14 @@ async fn start_history(path: String, hidden: Vec<String>, solo: Vec<String>, sta
     let refs = refs.await.map_err(|e| e.to_string())??;
 
     Ok(StreamInfo { gen, remotes, fingerprint, refs })
+}
+
+/// The UI left the repo (another tab, a New tab, the last tab closed, a load
+/// that failed or waits for a fetch): git stops and the history read so far
+/// is freed, unless a newer stream than `gen` has started meanwhile.
+#[tauri::command]
+fn stop_history(gen: u64, state: State<'_, AppState>) {
+    stop_stream(&state.stream, gen);
 }
 
 /// Commits that appeared since the caller's snapshot: everything reachable
@@ -1458,7 +1500,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch])
+        .invoke_handler(tauri::generate_handler![pick_repo, open_repo, start_history, stop_history, history_page, sync_history, commit_detail, file_diff, branch_tracking, work_status, list_stashes, pull_requests, open_url, repo_fingerprint, fetch::fetch, fetch::list_remotes, switch::switch_branch])
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
         .run(|app, event| {
@@ -1744,6 +1786,75 @@ mod tests {
         assert_eq!(walk(&["refs/heads/feature/"]), "deep,root,thai");
         assert_eq!(walk(&["refs/remotes/origin/x", "refs/heads/solo"]), "root,solo,x");
         assert_eq!(walk(&["refs/heads/gone"]), "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // stop_history: the slot is emptied and the stream told to stop only when
+    // it is not newer than the gen the UI asks to stop (a stop that reaches the
+    // backend after the next start_history must not kill the new stream).
+    #[test]
+    fn stop_stream_respects_gen() {
+        let mk = |gen| Stream { gen, shared: Arc::default(), child: Arc::new(Mutex::new(None)), stop: Arc::default() };
+        let slot: Mutex<Option<Stream>> = Mutex::new(None);
+        stop_stream(&slot, 5);   // nothing to stop: no panic, nothing happens
+        assert!(slot.lock().unwrap().is_none());
+
+        *slot.lock().unwrap() = Some(mk(7));
+        let flag = slot.lock().unwrap().as_ref().unwrap().stop.clone();
+        stop_stream(&slot, 6);   // a newer stream than asked: kept
+        assert_eq!(slot.lock().unwrap().as_ref().map(|s| s.gen), Some(7));
+        assert!(!flag.load(Ordering::SeqCst));
+        stop_stream(&slot, 7);
+        assert!(slot.lock().unwrap().is_none());
+        assert!(flag.load(Ordering::SeqCst));
+
+        *slot.lock().unwrap() = Some(mk(3));
+        stop_stream(&slot, 9);   // older than asked: removed
+        assert!(slot.lock().unwrap().is_none());
+    }
+
+    // A stopped stream stops reading at once, even when killing `git` hits
+    // only a launcher and the real git keeps writing: read_log drops the pipe
+    // (git then exits on a broken pipe), returns, and reports no error.
+    #[test]
+    fn read_log_stops_when_asked() {
+        let dir = std::env::temp_dir().join(format!("gitkrapao-stop-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = git_command(&dir, &["init", "-q", "-b", "main"]).output().unwrap();
+        assert!(out.status.success());
+        // One commit is enough: its subject is padded to 256 kB (`%<(N)`), far more
+        // than a pipe buffer holds, and the record byte comes first so read_log
+        // sees a record (and the stop) before git has written the rest.
+        let script = "commit refs/heads/main\ncommitter t <t@t> 1700000000 +0000\ndata 2\nx\n\n";
+        let mut fi = git_command(&dir, &["fast-import", "--quiet"]).stdin(Stdio::piped()).spawn().unwrap();
+        {
+            use std::io::Write;
+            fi.stdin.take().unwrap().write_all(script.as_bytes()).unwrap();
+        }
+        assert!(fi.wait().unwrap().success());
+
+        let fmt = format!("--format=%x1e{}", "%<(16000)%s".repeat(16));   // git ignores a padding over ~16k
+        let mut child = git_command(&dir, &["log", &fmt, "main"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap();
+        let (stdout, stderr) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
+        let shared: Shared = Arc::default();
+        let stop = Arc::new(AtomicBool::new(true));   // stopped before the first record arrives
+        let (tx, rx) = mpsc::channel();
+        let (sh, slot) = (shared.clone(), Arc::new(Mutex::new(Some(child))));
+        std::thread::spawn(move || {
+            read_log(stdout, stderr, sh, slot, stop);
+            let _ = tx.send(());
+        });
+        assert!(rx.recv_timeout(Duration::from_secs(30)).is_ok(), "read_log did not return after a stop");
+        let s = shared.0.lock().unwrap();
+        assert!(s.done && s.error.is_none() && !s.capped, "done={} error={:?}", s.done, s.error);
+        assert!(s.ends.len() <= 1, "read {} records after the stop", s.ends.len());
+        drop(s);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

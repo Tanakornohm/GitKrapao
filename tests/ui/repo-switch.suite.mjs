@@ -39,6 +39,7 @@ export const setup = () => `<script>
     },
     work_status: () => ({ files: [], total: 0 }),
     list_remotes: () => [],
+    stop_history: () => null,
   };
   window.__TAURI__ = { core: { invoke: (cmd, args) => {
     f.calls.push(cmd + (cmd === 'pull_requests' || cmd === 'start_history' ? ':' + (args || {}).path : ''));

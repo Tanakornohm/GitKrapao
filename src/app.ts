@@ -2166,7 +2166,18 @@ let busyPath: string | null = null;   // repo of the load or sync that holds `bu
 let loadSeq = 0;             // newest load (or sync) wins: an older one stops after its next await
 let streamGen = 0;           // backend history stream the loaded rows came from
 let streamPos = 0;           // records consumed from that stream (rows can also come from syncs)
+let startedGen = 0;          // newest stream start_history returned (gens only grow)
+let stoppedGen = 0;          // every stream up to this gen has been told to stop
 const SYNC_CAP = 5000;       // more new commits than this: reload instead of merging
+
+/* Leaving a repo releases its history stream: git stops and the rows read so
+   far are freed. The backend ignores the stop when a newer stream than gen has
+   started, so a stop that arrives after the next start_history is harmless. */
+function stopHistory(gen = startedGen){
+  if (!NATIVE || gen <= stoppedGen) return;
+  stoppedGen = gen;
+  invoke('stop_history', { gen }).catch(() => {});
+}
 
 function recentList(){ return lsJSON<Pick<RepoInfo, 'path' | 'name'>[]>('lanes.recent', []).filter(r => r && r.path); }
 function addRecent(info: RepoInfo){
@@ -2219,7 +2230,9 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
     // A refresh reloads as deep as the user had scrolled, so the view stays put.
     const want = keep ? Math.max(PAGE, S.commits.length) : PAGE;
     const st = await invoke('start_history', { path: info.path, hidden, solo });
-    if (seq !== loadSeq) return;
+    startedGen = Math.max(startedGen, st.gen);
+    // Superseded (another tab, a New tab): nobody reads this stream.
+    if (seq !== loadSeq) { stopHistory(st.gen); return; }
     // Every soloed branch is gone (deleted, renamed): leave solo; the
     // finally block below reloads with the full graph.
     if (solo.length && !st.refs.refs.some(([, n]) => coveredBy(n, solo))) { saveSolo([], info.path); hiddenGen++; }
@@ -2263,9 +2276,11 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
    one stays on screen or can be refreshed, synced or polled under the new tab.
    A load in flight is dropped (busy too, or polls would stop for good and the
    same repo could never load again), and so is a page still on its way
-   (streamGen). With current null nothing polls. */
+   (streamGen). With current null nothing polls. Its history stream is
+   stopped. */
 function dropRepo({ empty = true }: { empty?: boolean } = {}){
   loadSeq++; openSeq++; jumpSeq++; streamGen = -1;
+  stopHistory();
   busy = false; busyPath = null; document.body.classList.remove('loading');
   current = null; fingerprintSeen = null;
   if (prs.path) { prCache.set(prs.path, prs); prs = noPrs(); }

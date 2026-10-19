@@ -21,10 +21,11 @@ export const setup = v => `<script>
            page2: rec(h('c', '1'), '', 'c-one', 1700000100) },
   };
   const refsOf = r => ({ refs: [[r.tip, r.branch]], headRef: r.branch, headSha: r.tip });
-  const byGen = g => Object.values(repos).find(r => r.gen === g);
   const stashA = { sha: 'e'.repeat(40), parents: [h('a', '1'), 'f'.repeat(40)], name: 'stash@{0}', time: 1700000150, message: 'On a-main: a-stash' };
   // hold[name] makes the matching call wait until release(name, value).
-  const f = window.__fake = { calls: [], hold: {}, wait: {}, variant: '${v.name || ''}' };
+  // Like the backend, every start_history gets a new gen; stops records each stop_history gen.
+  const f = window.__fake = { calls: [], hold: {}, wait: {}, variant: '${v.name || ''}', gen: 0, gens: {}, genOf: {}, stops: [] };
+  const byGen = g => f.gens[g];
   const gate = name => new Promise(res => (f.wait[name] = f.wait[name] || []).push(res));
   f.release = (name, value) => { f.hold[name] = false; (f.wait[name] || []).splice(0).forEach(r => r(value)); };
   f.pending = name => (f.wait[name] || []).length;
@@ -37,7 +38,8 @@ export const setup = v => `<script>
       if (a.path === B && f.hold.startB) await gate('startB');
       const r = repos[a.path];
       if (!r) throw 'not a repo';
-      return { gen: r.gen, remotes: r.remotes || [], fingerprint: 'fp', refs: refsOf(r) };
+      const gen = ++f.gen; f.gens[gen] = r; f.genOf[a.path] = gen;
+      return { gen, remotes: r.remotes || [], fingerprint: 'fp', refs: refsOf(r) };
     },
     history_page: async a => {
       const r = byGen(a.gen);
@@ -58,6 +60,7 @@ export const setup = v => `<script>
     },
     pull_requests: () => ({ repo: null, items: [] }),
     work_status: () => ({ files: [], total: 0 }),
+    stop_history: a => { f.stops.push(a.gen); return null; },
     list_remotes: a => (repos[a.path] && repos[a.path].remotes) || [],
   };
   window.__TAURI__ = { core: { invoke: (cmd, args) => {
@@ -161,7 +164,9 @@ run(async () => {
   // New tab: the empty state with recents; picking a repo that is open already
   // goes to its tab and drops the empty one.
   seedRecent();
+  const genB = f.genOf[B], st0 = f.stops.length;
   key('t', { ctrlKey: true }); await wait(100);
+  ok(genB > 0 && f.stops.slice(st0).includes(genB), 'new tab stops the history stream of b', genB + ' ' + JSON.stringify(f.stops));
   ok(tabs().length === 3 && names()[2] === 'New tab' && active() === 2 && empty() && $$('#emptyRecent .recent-item').length === 3, 'new tab', state() + ' | empty=' + empty());
   await click($('#emptyRecent .recent-item[data-path="' + A + '"]'), 300);
   ok(tabs().length === 2 && names().join() === 'a,b' && active() === 0 && rows().includes('a-three') && !empty(), 'new tab: picking an open repo activates its tab', state());
@@ -237,8 +242,10 @@ run(async () => {
   $('#fetchBtn').click(); await wait(100);
   ok(f.pending('fetch') === 1, 'a: fetch running', f.pending('fetch'));
   await click(tabs()[1], 300);
+  const genB2 = f.genOf[B], st1 = f.stops.length;
   await click(tabs()[0], 300);   // a's load waits for the fetch
   ok(!rows().includes('a-') && !rows().includes('b-') && active() === 0, 'a: nothing of b shown while a waits for its fetch', rows());
+  ok(genB2 > 0 && f.stops.slice(st1).includes(genB2), 'a tab waiting for its fetch stops the history stream of b', genB2 + ' ' + JSON.stringify(f.stops));
   await click(tabs()[1], 300);
   const n4 = f.calls.length;
   f.release('fetch'); await wait(400);
