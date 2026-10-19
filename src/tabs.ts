@@ -22,7 +22,7 @@ const TABS_KEY = 'lanes.tabs', LAST_KEY = 'lanes.last';
 const read = (k: string): unknown => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch (e) { return null; } };
 const write = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage full or off */ } };
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
-const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
+export const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 
 /* A saved entry, or null when it is not one. */
 function entry(v: unknown): Tab | null {

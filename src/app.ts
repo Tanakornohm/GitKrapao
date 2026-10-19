@@ -15,7 +15,7 @@ import type { Track } from './bindings/Track';
 import type { WorkFile } from './bindings/WorkFile';
 import type { WorkStatus } from './bindings/WorkStatus';
 import type { Tab, Tabs } from './tabs';
-import { NEW_TAB, afterClose, cycle, indexOfPath, loadTabs, nth, saveTabs } from './tabs';
+import { NEW_TAB, afterClose, baseName, cycle, indexOfPath, loadTabs, nth, saveTabs } from './tabs';
 
 (() => {
 'use strict';
@@ -2187,6 +2187,7 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
   // The backend refuses while a fetch or switch changes this repo; runOp loads it when done.
   if (opPath === info.path) { pendingLoad = { info, keep, manual }; return; }
   const seq = ++loadSeq;
+  if (!current || current.path !== info.path) jumpSeq++;   // a branch jump still paging in the old repo stops
   busy = true; busyPath = info.path; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
   const hg = hiddenGen, hidden = hiddenList(info.path), solo = soloList(info.path);
@@ -2234,7 +2235,7 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
    all. A load in flight is dropped (busy too, or polls would stop for good and
    the same repo could never load again), and with current null nothing polls. */
 function dropRepo(){
-  loadSeq++; openSeq++;
+  loadSeq++; openSeq++; jumpSeq++;
   busy = false; busyPath = null; document.body.classList.remove('loading');
   current = null; fingerprintSeen = null;
   if (prs.path) { prCache.set(prs.path, prs); prs = noPrs(); }
@@ -2289,7 +2290,6 @@ async function pickRepo(){
    one; background tabs never call the backend. */
 let tabs: Tabs = { list: [], active: -1 };   // read from lanes.tabs at boot
 const tabStrip = $('#tabStrip'), tabList = $('#tabList');
-const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 
 function renderTabs(): void {
   const focused = tabStrip.contains(document.activeElement);
