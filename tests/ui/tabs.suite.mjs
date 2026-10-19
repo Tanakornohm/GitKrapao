@@ -156,6 +156,9 @@ run(async () => {
   // While b loads, nothing of a is on screen, and Refresh or a click on b cannot bring a back.
   ok(!rows().includes('a-') && !side().includes('a-main') && $('#repoName').textContent !== 'a' && !$('#sideList .sb-stash'),
     'while b loads nothing of a is shown', rows() + ' | ' + side() + ' | ' + $('#repoName').textContent);
+  const loading = $('#tabLoading');
+  ok(!loading.hidden && loading.textContent === 'Loading history…' && $('#emptyState').hidden && $('#tabBusy').hidden,
+    'while b loads a spinner sits in the middle', loading.hidden + ' | ' + loading.textContent);
   const startsB = () => callsFor(B).filter(c => c[0] === 'start_history').length, sb = startsB(), n3 = f.calls.length;
   key('r', { ctrlKey: true }); await wait(100);
   $('#refreshBtn').click(); await wait(100);
@@ -163,6 +166,12 @@ run(async () => {
   ok(!callsFor(A, n3).length && startsB() === sb, 'while b loads Refresh and a click on b do not load a', JSON.stringify(f.calls.slice(n3)));
   f.release('startB'); await wait(300);
   ok(rows().includes('b-two') && active() === 1, 'b loads after the wait', rows());
+  ok(loading.hidden, 'the spinner goes once b is shown');
+  // A refresh keeps the graph on screen: no spinner over it.
+  f.hold.startB = true;
+  key('r', { ctrlKey: true }); await wait(100);
+  ok(loading.hidden && rows().includes('b-two'), 'a refresh keeps the graph without the spinner', loading.hidden + ' | ' + rows());
+  f.release('startB'); await wait(300);
   const n1 = f.calls.length;
   await wait(10000);
   ok(!callsFor(A, n1).length && callsFor(B, n1).some(c => c[0] === 'repo_fingerprint'), 'background tabs are idle', JSON.stringify(f.calls.slice(n1)));

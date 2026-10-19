@@ -350,6 +350,7 @@ let S: AppState = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: ''
 let sel = -1, matches: number[] = [], matchPtr = -1, matchSet: Set<number> | null = null;
 const wrap = $('#wrap'), grid = $('#grid'), body = $('#body'), detail = $('#detail');
 const tabBusy = $('#tabBusy');   // in place of the graph while the repo waits for its fetch or switch (waitForOp)
+const tabLoading = $('#tabLoading');   // a spinner in the middle while a repo that is not on screen yet loads
 /* Column widths in px. graph null = wide enough for every lane; msg null =
    fill the space left over. Saved per viewer. */
 interface Cols { ref: number; graph: number | null; msg: number | null; date: number }
@@ -2197,7 +2198,7 @@ function recentButtons(cls: string, attrs = ''){
   return recentList().map(r => `<button class="${cls}"${attrs} data-path="${esc(r.path)}" title="${esc(r.path)}"><span class="n">${esc(r.name)}</span><span class="p">${esc(r.path)}</span></button>`).join('');
 }
 function showEmpty(){
-  tabBusy.hidden = true;
+  tabBusy.hidden = true; tabLoading.hidden = true;
   $('#emptyState').hidden = false;
   const items = recentButtons('recent-item');
   $('#emptyRecent').innerHTML = items ? `<div class="t">Recent</div>${items}` : '';
@@ -2215,7 +2216,7 @@ function waitForOp(info: RepoInfo, op: RepoOp, keep: boolean, manual: boolean){
   stashes = []; stashPath = null;
   $('#emptyState').hidden = true;
   $('#tabBusyText').textContent = `${op.kind === 'fetch' ? 'Fetching…' : 'Switching branch…'} the history loads when it finishes`;
-  tabBusy.hidden = false;
+  tabBusy.hidden = false; tabLoading.hidden = true;
   setData([], info.name, false);   // empty graph and panel, the repo's name in the toolbar
   detailFor = null; detail.innerHTML = '<div class="empty">Select a commit to see details</div>';
   $('#repoBtn').title = info.path;
@@ -2229,6 +2230,7 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
   if (op) { waitForOp(info, op, keep, manual); return; }
   const placeholder = !tabBusy.hidden;   // the load runOp runs after the repo waited for its operation
   tabBusy.hidden = true;
+  if (placeholder) tabLoading.hidden = false;   // the graph area is empty until this load ends
   const seq = ++loadSeq;
   busy = true; busyPath = info.path; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
@@ -2277,6 +2279,7 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
   } finally {
     if (seq === loadSeq) {
       busy = false; busyPath = null; document.body.classList.remove('loading');
+      tabLoading.hidden = true;
       // Branches were hidden or shown while this ran with the old list. Read
       // current when it runs: a tab switch in between leaves it null.
       if (hg !== hiddenGen && current) setTimeout(() => { if (current) loadRepo(current, { keep: true }); }, 0);
@@ -2305,7 +2308,8 @@ function dropRepo({ empty = true }: { empty?: boolean } = {}){
   $('#repoName').textContent = '—'; $('#headName').textContent = '—'; $('#stats').textContent = empty ? '' : 'Loading history…';
   $('#repoBtn').title = ''; document.title = 'GitKrapao';
   tabBusy.hidden = true;
-  if (empty) showEmpty(); else $('#emptyState').hidden = true;   // a repo is about to load
+  tabLoading.hidden = empty;   // a repo is about to load: the spinner stays until its load ends
+  if (empty) showEmpty(); else $('#emptyState').hidden = true;
 }
 
 /* Opening a repo (recent menu, Ctrl/⌘ O, the empty state) fills the active tab,
