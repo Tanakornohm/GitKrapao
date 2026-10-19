@@ -137,7 +137,6 @@ pub(crate) fn running_pids(reg: &OpRegistry) -> Vec<u32> {
 }
 
 /// Body text for the "close now?" dialog, or None when nothing is running.
-#[allow(dead_code)] // the close handler that shows it comes in the next task
 pub(crate) fn close_warning(reg: &OpRegistry) -> Option<String> {
     let ops = reg.lock().unwrap_or_else(|e| e.into_inner());
     let mut lines: Vec<String> = ops.values().map(|op| format!("{} — {}", op.kind, op.name)).collect();

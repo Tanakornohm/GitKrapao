@@ -5,10 +5,10 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{Manager, RunEvent, State};
+use tauri::{Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 mod fetch;
@@ -183,6 +183,8 @@ struct AppState {
     busy_repos: fetch::OpRegistry,
     /// Serializes reads and writes of the trust file.
     trust_lock: Mutex<()>,
+    /// The "operations still running" close dialog is open (one at a time).
+    closing_prompt: AtomicBool,
 }
 
 fn git_command(repo: &Path, args: &[&str]) -> Command {
@@ -1460,6 +1462,37 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building GitKrapao")
         .run(|app, event| {
+            // Closing while a fetch or switch runs would kill git mid-way (a switch
+            // can leave the work tree half updated), so ask first.
+            if let RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } = &event {
+                if label == "main" {
+                    let state = app.state::<AppState>();
+                    if let Some(text) = fetch::close_warning(&state.busy_repos) {
+                        api.prevent_close();
+                        // A second click while the dialog is open stays prevented
+                        // but must not open a second dialog.
+                        if !state.closing_prompt.swap(true, Ordering::SeqCst) {
+                            let app = app.clone();
+                            // ask_native blocks until answered: never on the event loop.
+                            std::thread::spawn(move || {
+                                let close = fetch::ask_native(&app, "GitKrapao: operations still running", "Close anyway", &text);
+                                let state = app.state::<AppState>();
+                                state.closing_prompt.store(false, Ordering::SeqCst);
+                                if close {
+                                    for pid in fetch::running_pids(&state.busy_repos) {
+                                        kill_tree(pid);
+                                    }
+                                    // destroy does not raise CloseRequested again;
+                                    // RunEvent::Exit then cleans up as usual.
+                                    if let Some(w) = app.get_webview_window("main") {
+                                        let _ = w.destroy();
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
             // Don't leave a git process running after the window closes.
             if let RunEvent::Exit = event {
                 let state = app.state::<AppState>();
