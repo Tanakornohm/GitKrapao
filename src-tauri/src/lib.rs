@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -33,6 +33,8 @@ const PAGE_WAIT: Duration = Duration::from_secs(60);
 struct RepoInfo {
     path: String,
     name: String,
+    // GitDirs::lock_key: linked worktrees of one repo share it.
+    lock_key: String,
 }
 
 /// Ref snapshot. Tips are commit ids; annotated tags are peeled one level and
@@ -177,10 +179,8 @@ struct AppState {
     stream: Mutex<Option<Stream>>,
     next_gen: AtomicU64,
     dirs: Mutex<HashMap<String, GitDirs>>,
-    /// Lock keys (GitDirs::lock_key) of repos with a fetch or switch running.
-    busy_repos: Arc<Mutex<HashSet<String>>>,
-    /// PID of the running fetch or switch, so closing the app can stop it.
-    op_pid: Mutex<Option<u32>>,
+    /// Fetches and switches running, by lock key (GitDirs::lock_key): one per repo.
+    busy_repos: fetch::OpRegistry,
     /// Serializes reads and writes of the trust file.
     trust_lock: Mutex<()>,
 }
@@ -250,8 +250,8 @@ fn resolve_repo(state: &AppState, path: &Path) -> Result<RepoInfo, String> {
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| top.display().to_string());
-    let info = RepoInfo { path: top.to_string_lossy().into_owned(), name };
     let lock_key = path_key(&common_dir);
+    let info = RepoInfo { path: top.to_string_lossy().into_owned(), name, lock_key: lock_key.clone() };
     state.dirs.lock().unwrap().insert(info.path.clone(), GitDirs { git_dir, common_dir, lock_key });
     Ok(info)
 }
@@ -1466,8 +1466,7 @@ pub fn run() {
                 if let Some(s) = state.stream.lock().unwrap().as_ref() {
                     s.kill();
                 }
-                let pid = *state.op_pid.lock().unwrap();
-                if let Some(pid) = pid {
+                for pid in fetch::running_pids(&state.busy_repos) {
                     kill_tree(pid);
                 }
             }
@@ -1477,6 +1476,40 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Linked worktrees of one repo have different paths but share the lock key,
+    // so a fetch in one blocks a fetch in the other.
+    #[test]
+    fn repo_info_carries_the_shared_lock_key() {
+        let dir = std::env::temp_dir().join(format!("gitkrapao-lockkey-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let global = dir.join("empty-global");
+        std::fs::write(&global, "").unwrap();
+        let main_dir = dir.join("main");
+        let wt_dir = dir.join("wt");
+        std::fs::create_dir_all(&main_dir).unwrap();
+        let run = |args: &[&str]| {
+            let mut cmd = git_command(&main_dir, args);
+            cmd.env("GIT_CONFIG_GLOBAL", &global).env("GIT_CONFIG_NOSYSTEM", "1");
+            let out = cmd.output().unwrap();
+            assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        run(&["init", "-q", "-b", "main"]);
+        let tree = run(&["hash-object", "-t", "tree", "-w", "--stdin"]); // empty tree (stdin is null)
+        let c = run(&["-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", &tree, "-m", "root"]);
+        run(&["update-ref", "refs/heads/main", &c]);
+        run(&["worktree", "add", "-q", "--detach", &wt_dir.to_string_lossy(), "main"]);
+
+        let state = AppState::default();
+        let m = resolve_repo(&state, &main_dir).unwrap();
+        let w = resolve_repo(&state, &wt_dir).unwrap();
+        assert_eq!(m.lock_key, w.lock_key);
+        assert_ne!(m.path, w.path);
+        assert!(!m.lock_key.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // Real `git show` output for a commit that adds, modifies, deletes and
     // renames files, including a binary file, a Thai path and a space.

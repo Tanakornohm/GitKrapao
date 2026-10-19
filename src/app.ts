@@ -2140,7 +2140,7 @@ let streamGen = 0;           // backend history stream the loaded rows came from
 let streamPos = 0;           // records consumed from that stream (rows can also come from syncs)
 const SYNC_CAP = 5000;       // more new commits than this: reload instead of merging
 
-function recentList(){ return lsJSON<RepoInfo[]>('lanes.recent', []).filter(r => r && r.path); }
+function recentList(){ return lsJSON<Pick<RepoInfo, 'path' | 'name'>[]>('lanes.recent', []).filter(r => r && r.path); }
 function addRecent(info: RepoInfo){
   const list = recentList().filter(r => r.path !== info.path);
   list.unshift({ path: info.path, name: info.name });
