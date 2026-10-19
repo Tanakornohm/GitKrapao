@@ -1819,14 +1819,21 @@ type PrItem = PullRequest & { card: 'pr'; key: string };
 interface PrState { path: string | null; state: 'idle' | 'loading' | 'ok' | 'none' | 'error'; items: PrItem[]; repo: string | null; error: string; at: number }
 let prs: PrState = { path: null, state: 'idle', items: [], repo: null, error: '', at: 0 };
 let prSeq = 0;
+const prCache = new Map<string, PrState>();   // the list of every other repo seen, so going back does not run az again
+function forgetPrs(path: string): void { prCache.delete(path); }   // a repo that is no longer open
 const PR_EVERY = 5 * 60e3;   // pull requests change on the server; ask again this often
 /* minAge: skip if the list is newer than this. A sync (commit, fetch, a new
    remote URL) asks sooner than the timer, a manual refresh (force) always. */
 async function loadPrs({ force = false, minAge = PR_EVERY }: { force?: boolean; minAge?: number } = {}){
   if (!NATIVE || !current) return;
   const path = current.path;
-  if (prs.path !== path) prs = { path, state: 'loading', items: [], repo: null, error: '', at: 0 };
-  else if (!force && Date.now() - prs.at < minAge) return;
+  const switched = prs.path !== path;
+  if (switched) {
+    // A list still loading has nothing to keep (its answer is dropped below): the next visit asks again.
+    if (prs.path && prs.state !== 'loading') prCache.set(prs.path, prs);
+    prs = prCache.get(path) ?? { path, state: 'loading', items: [], repo: null, error: '', at: 0 };
+  }
+  if (!force && Date.now() - prs.at < minAge) { if (switched) renderSide(); return; }
   const seq = ++prSeq;
   prs.at = Date.now();
   if (prs.state === 'loading') renderSide();
@@ -2136,6 +2143,8 @@ $('#bannerClose').addEventListener('click', hideError);
 let current: RepoInfo | null = null;
 let fingerprintSeen: string | null = null;
 let busy = false, moreBusy = false;
+let busyPath: string | null = null;   // repo of the load or sync that holds `busy`
+let loadSeq = 0;             // newest load (or sync) wins: an older one stops after its next await
 let streamGen = 0;           // backend history stream the loaded rows came from
 let streamPos = 0;           // records consumed from that stream (rows can also come from syncs)
 const SYNC_CAP = 5000;       // more new commits than this: reload instead of merging
@@ -2158,24 +2167,28 @@ function showEmpty(){
 }
 
 async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep?: boolean; manual?: boolean } = {}){
-  if (busy) return;
+  if (busy && busyPath === info.path) return;   // a refresh while this repo loads; another repo supersedes the load below
   // The backend refuses while a fetch or switch changes this repo; runOp loads it when done.
   if (opPath === info.path) { pendingLoad = { info, keep, manual }; return; }
-  busy = true; document.body.classList.add('loading');
+  const seq = ++loadSeq;
+  busy = true; busyPath = info.path; document.body.classList.add('loading');
   if (!keep) { $('#stats').textContent = 'Loading history…'; closeDiff(); }
   const hg = hiddenGen, hidden = hiddenList(info.path), solo = soloList(info.path);
   try {
     // A refresh reloads as deep as the user had scrolled, so the view stays put.
     const want = keep ? Math.max(PAGE, S.commits.length) : PAGE;
     const st = await invoke('start_history', { path: info.path, hidden, solo });
+    if (seq !== loadSeq) return;
     // Every soloed branch is gone (deleted, renamed): leave solo; the
     // finally block below reloads with the full graph.
     if (solo.length && !st.refs.refs.some(([, n]) => coveredBy(n, solo))) { saveSolo([], info.path); hiddenGen++; }
     const page = await invoke('history_page', { gen: st.gen, start: 0, count: want });
+    if (seq !== loadSeq) return;
     const { commits, bad } = parseLog(page.log);
     // The ref listing ran alongside the log; if anything moved meanwhile the
     // refs may be newer than the rows, so the next poll reloads in full.
     const settled = await invoke('repo_fingerprint', { path: info.path });
+    if (seq !== loadSeq) return;
     current = info; fingerprintSeen = st.fingerprint; streamGen = st.gen; streamPos = commits.length + bad.length;
     $('#emptyState').hidden = true;
     setData(commits, info.name, false, { remotes: st.remotes, refs: st.refs, hidden, solo, keep, ordered: true, more: page.more, capped: page.capped });
@@ -2185,24 +2198,31 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
     hideError();
     loadTracking(); loadStashes(); loadPrs({ force: manual }); loadWip({ force: true });
   } catch (e) {
+    if (seq !== loadSeq) return;   // superseded: its error (a 'stale' stream included) is nobody's business
     if (String(e) === BUSY) pendingLoad = { info, keep, manual };
     else {
       showError(String(e));
       if (!current) showEmpty();
     }
   } finally {
-    busy = false; document.body.classList.remove('loading');
-    // Branches were hidden or shown while this ran with the old list.
-    if (hg !== hiddenGen && current) setTimeout(() => loadRepo(current!, { keep: true }), 0);   // read when it runs, as before
+    if (seq === loadSeq) {
+      busy = false; busyPath = null; document.body.classList.remove('loading');
+      // Branches were hidden or shown while this ran with the old list.
+      if (hg !== hiddenGen && current) setTimeout(() => loadRepo(current!, { keep: true }), 0);   // read when it runs, as before
+    }
   }
 }
 
+let openSeq = 0;   // the newest click wins here too: open_repo of an earlier click may answer late
 async function openPath(path: string, { quiet = false }: { quiet?: boolean } = {}){
+  const seq = ++openSeq;
   try {
     const info = await invoke('open_repo', { path });
+    if (seq !== openSeq) return;
     closeMenu();
     await loadRepo(info);
   } catch (e) {
+    if (seq !== openSeq) return;
     forgetRecent(path);
     if (!quiet) showError(String(e));
     if (!current) showEmpty();
@@ -2258,12 +2278,15 @@ async function refresh(){ if (current) await loadRepo(current, { keep: true, man
 async function syncRepo(){
   if (!current || busy || moreBusy || opHere()) return;
   let full: string | null = S.forceFull ? 'refs may be newer than the loaded rows' : null;
+  // A load of another repo started meanwhile bumps loadSeq: this sync then stops without touching anything.
+  const seq = ++loadSeq;
   if (!full) {
-    busy = true;
+    busy = true; busyPath = current.path;
     const hg = hiddenGen, hidden = hiddenList(), solo = soloList();
     try {
       // A loaded desktop repo always has tips (setData).
       const r = await invoke('sync_history', { path: current.path, exclude: [...S.tips!], hidden, solo, limit: SYNC_CAP });
+      if (seq !== loadSeq) return;
       if (hg !== hiddenGen) full = 'hidden branches changed';
       else if (r.fingerprintBefore !== r.fingerprintAfter) full = 'repo changed while reading';
       else if (r.over) full = 'too many new commits';
@@ -2280,9 +2303,10 @@ async function syncRepo(){
     } catch (e) {
       full = String(e);
     } finally {
-      busy = false;
+      if (seq === loadSeq) { busy = false; busyPath = null; }
     }
   }
+  if (seq !== loadSeq) return;
   if (full === BUSY) return;   // a fetch started; it syncs when done
   if (full) await loadRepo(current, { keep: true });
 }
