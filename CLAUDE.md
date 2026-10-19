@@ -81,7 +81,7 @@ A GitKraken-style Git GUI built with Tauri (Rust + TypeScript), using pnpm.
 
 ## Column widths
 - Every column is resizable at the right edge of its header (drag / double-click to reset / arrow keys when focused). Widths live in `cols` and are saved in localStorage `lanes.cols`.
-- `graph: null` = wide enough for every lane, `msg: null` = fill the remaining space. If the Graph column is narrower than the lanes, the canvas is cut and fades at the edge (`graphColW()` is used instead of `S.graphW` when drawing).
+- `graph: null` = wide enough for every lane but at most a third of the window (`graphColW`; followed on window resize), so a repo with many branches never pushes the message and date columns off screen; double-click resets to it, a dragged width wins. `msg: null` = fill the remaining space. Test: `tests/ui/graph-width.suite.mjs`. If the Graph column is narrower than the lanes, the canvas is cut and fades at the edge (`graphColW()` is used instead of `S.graphW` when drawing).
 - Header cells and row cells must always have the same widths; never give `.head` and `.row` different min-width/padding.
 
 ## Left panel (renderSide)

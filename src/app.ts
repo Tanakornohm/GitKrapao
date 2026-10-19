@@ -351,8 +351,10 @@ let sel = -1, matches: number[] = [], matchPtr = -1, matchSet: Set<number> | nul
 const wrap = $('#wrap'), grid = $('#grid'), body = $('#body'), detail = $('#detail');
 const tabBusy = $('#tabBusy');   // in place of the graph while the repo waits for its fetch or switch (waitForOp)
 const tabLoading = $('#tabLoading');   // a spinner in the middle while a repo that is not on screen yet loads
-/* Column widths in px. graph null = wide enough for every lane; msg null =
-   fill the space left over. Saved per viewer. */
+/* Column widths in px. graph null = wide enough for every lane, but at most a
+   third of the window (a repo with many branches would push the message and
+   date off screen; the lanes beyond fade at the edge); msg null = fill the
+   space left over. Saved per viewer. */
 interface Cols { ref: number; graph: number | null; msg: number | null; date: number }
 type ColKey = keyof Cols;
 const COLS = {
@@ -370,7 +372,8 @@ for (const k of Object.keys(COLS) as ColKey[]) {
   if (v !== null && !(Number.isFinite(v) && v >= COLS[k].min && v <= COLS[k].max)) all[k] = COLS[k].reset();
 }
 const saveCols = () => lsSet('lanes.cols', JSON.stringify(cols));
-const graphColW = () => cols.graph || S.graphW || 0;
+const graphColW = () => cols.graph || Math.min(S.graphW || 0, Math.max(COLS.graph.min, Math.floor(window.innerWidth / 3)));
+window.addEventListener('resize', () => { if (!cols.graph) applyCols(); });   // the default follows the window
 function applyCols(){
   grid.style.setProperty('--refw', cols.ref + 'px');
   grid.style.setProperty('--graphw', graphColW() + 'px');
