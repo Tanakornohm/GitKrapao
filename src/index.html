@@ -8,6 +8,15 @@
 </head>
 <body>
 <div class="app">
+  <nav class="tabs" id="tabs" aria-label="Repositories" hidden>
+    <div class="tabs-scroll" id="tabStrip" role="tablist" aria-label="Repositories"></div>
+    <button class="tabs-btn" id="tabNew" aria-label="New tab" title="New tab (Ctrl+T)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 2.5v11M2.5 8h11"/></svg></button>
+    <div class="tabs-spacer"></div>
+    <div class="tabs-more-wrap">
+      <button class="tabs-btn" id="tabMore" aria-haspopup="true" aria-expanded="false" aria-controls="tabList" aria-label="All tabs" title="All tabs"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg></button>
+      <div class="menu tabs-menu" id="tabList" role="menu" hidden></div>
+    </div>
+  </nav>
   <header class="toolbar">
     <button class="btn icon-btn" id="sideBtn" aria-controls="side" aria-expanded="true" aria-label="Toggle branch panel" title="Toggle branch panel (Ctrl/⌘ B)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg></button>
     <div class="repo-wrap">
@@ -51,7 +60,7 @@
       <div class="grid" id="grid">
         <div class="head">
           <div class="col-ref"><span class="h-label">Branch / tag</span><span class="resizer" data-col="ref" role="separator" aria-orientation="vertical" aria-label="Resize Branch / tag column" tabindex="0" title="Drag to resize, double-click to reset"></span></div>
-          <div class="col-graph"><span class="h-label">Graph</span><span class="resizer" data-col="graph" role="separator" aria-orientation="vertical" aria-label="Resize Graph column" tabindex="0" title="Drag to resize, double-click to fit all lanes"></span></div>
+          <div class="col-graph"><span class="h-label">Graph</span><span class="resizer" data-col="graph" role="separator" aria-orientation="vertical" aria-label="Resize Graph column" tabindex="0" title="Drag to resize, double-click to reset"></span></div>
           <div class="col-msg"><span class="h-label">Commit message</span><span class="resizer" data-col="msg" role="separator" aria-orientation="vertical" aria-label="Resize Commit message column" tabindex="0" title="Drag to resize, double-click to fill the space"></span></div>
           <div class="col-date"><span class="h-label">Date</span><span class="resizer" data-col="date" role="separator" aria-orientation="vertical" aria-label="Resize Date column" tabindex="0" title="Drag to resize, double-click to reset"></span></div>
         </div>
@@ -69,6 +78,8 @@
       </div>
       <div class="df-body" id="dfBody" tabindex="0"></div>
     </section>
+    <div class="tab-busy" id="tabBusy" role="status" hidden><span class="spin" aria-hidden="true"></span><span id="tabBusyText"></span></div>
+    <div class="tab-busy" id="tabLoading" role="status" hidden><span class="spin" aria-hidden="true"></span><span>Loading history…</span></div>
     </div>
     <aside class="detail" id="detail" aria-label="Commit details"><div class="empty">Select a commit to see details</div></aside>
 

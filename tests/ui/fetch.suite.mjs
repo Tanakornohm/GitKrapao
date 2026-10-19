@@ -1,7 +1,7 @@
 // Fetch button, ahead/behind in the toolbar and the Output drawer, against a
 // fake __TAURI__ whose `fetch` stays pending until the probe resolves it.
-// While a fetch runs nothing polls; afterwards the graph syncs once (or runs
-// the refresh asked for meanwhile). Text from git is never markup.
+// While a fetch runs nothing polls and Refresh is off; afterwards the graph
+// syncs once. Text from git is never markup.
 export const prodSafe = true;
 export const budget = 90000;
 export const variants = [{ name: 'remotes' }, { name: 'none' }];
@@ -17,7 +17,7 @@ export const setup = v => `<script>
     track: [{ name: 'main', upstream: 'refs/remotes/origin/main', ahead: 2, behind: 5, gone: false }],
   };
   const answers = {
-    open_repo: a => ({ path: a.path, name: 'demo' }),
+    open_repo: a => ({ path: a.path, name: 'demo', lockKey: a.path }),
     start_history: () => ({ gen: 1, remotes: f.remotes, fingerprint: 'fp', refs }),
     history_page: () => ({ log, more: false, capped: false }),
     repo_fingerprint: () => 'fp',
@@ -27,6 +27,7 @@ export const setup = v => `<script>
     work_status: () => ({ files: [], total: 0 }),
     sync_history: () => ({ fingerprintBefore: 'fp', fingerprintAfter: 'fp', refs, log: '', over: false }),
     list_remotes: () => f.remotes,
+    stop_history: () => null,
     commit_detail: () => ({ body: 'x', files: [], totalFiles: 0, add: 0, del: 0 }),
     fetch: () => new Promise(res => { f.fetch = res; }),
   };
@@ -83,19 +84,22 @@ run(async () => {
   await wait(4000);
   ok(count('repo_fingerprint') > fp, 'polling resumes');
 
-  // 2: a refresh asked for during the fetch runs after it, instead of a sync.
+  // 2: Refresh is off during the fetch (button and Ctrl+R); afterwards one sync, no reload.
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }));
   await wait(20);
   ok(count('fetch') === 2, 'Ctrl+Shift+F fetches');
   const sh = count('start_history'), sy = count('sync_history');
+  ok($('#refreshBtn').getAttribute('aria-disabled') === 'true', 'refresh is off during the fetch', $('#refreshBtn').title);
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, bubbles: true }));
+  $('#refreshBtn').click();
   await wait(50);
-  ok(count('start_history') === sh, 'refresh waits for the fetch');
+  ok(count('start_history') === sh, 'no reload during the fetch');
   f.track = [];
   f.fetch(done());
   await wait(300);
-  ok(count('start_history') === sh + 1 && count('sync_history') === sy, 'the waiting refresh runs once, no extra sync');
+  ok(count('start_history') === sh && count('sync_history') === sy + 1, 'the refresh was not kept for later: one sync only');
   ok(track.hidden, 'ahead/behind hidden without an upstream');
+  ok($('#refreshBtn').getAttribute('aria-disabled') === 'false', 'refresh is back after the fetch');
 
   // 3: failure with markup in git's text.
   btn.click(); await wait(20);

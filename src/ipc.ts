@@ -17,6 +17,8 @@ export interface Commands {
   pick_repo: { args: Record<string, never>; result: RepoInfo | null };
   open_repo: { args: { path: string }; result: RepoInfo };
   start_history: { args: { path: string; hidden: string[]; solo: string[] }; result: StreamInfo };
+  /** Stops the history stream unless one newer than gen has started (the UI left the repo). */
+  stop_history: { args: { gen: number }; result: null };
   sync_history: { args: { path: string; exclude: string[]; hidden: string[]; solo: string[]; limit: number }; result: SyncInfo };
   history_page: { args: { gen: number; start: number; count: number }; result: Page };
   commit_detail: { args: { path: string; sha: string }; result: CommitDetail };
