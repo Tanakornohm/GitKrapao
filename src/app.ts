@@ -14,6 +14,8 @@ import type { PullRequest } from './bindings/PullRequest';
 import type { Track } from './bindings/Track';
 import type { WorkFile } from './bindings/WorkFile';
 import type { WorkStatus } from './bindings/WorkStatus';
+import type { Tab, Tabs } from './tabs';
+import { NEW_TAB, afterClose, cycle, indexOfPath, loadTabs, nth, saveTabs } from './tabs';
 
 (() => {
 'use strict';
@@ -82,7 +84,9 @@ const ICON = {
   eye:'<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>',
   eyeOff:'<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6.2 3.8A6.6 6.6 0 0 1 8 3.5c4.1 0 6.5 4.5 6.5 4.5a11 11 0 0 1-1.9 2.5M10.4 11.9A6 6 0 0 1 8 12.5C3.9 12.5 1.5 8 1.5 8a11.2 11.2 0 0 1 2.7-3.1M2 2l12 12"/></svg>',
   stash:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="3.5" rx="1"/><path d="M2.5 6v7.5h11V6M6.5 9h3"/></svg>',
-  pr:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V6.5a2 2 0 0 0-2-2H7.5M9 3l-1.5 1.5L9 6"/></svg>'
+  pr:'<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V6.5a2 2 0 0 0-2-2H7.5M9 3l-1.5 1.5L9 6"/></svg>',
+  repo:'<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 13.5V3a1.5 1.5 0 0 1 1.5-1.5h7.5v9.5H5a1.5 1.5 0 0 0-1.5 1.5 1.5 1.5 0 0 0 1.5 1.5h7.5"/><path d="M6 4.5h4"/></svg>',
+  x:'<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>'
 };
 
 /* ---------- sample repository (browser mode only) ---------- */
@@ -1820,7 +1824,10 @@ interface PrState { path: string | null; state: 'idle' | 'loading' | 'ok' | 'non
 let prs: PrState = { path: null, state: 'idle', items: [], repo: null, error: '', at: 0 };
 const prSeq = new Map<string, number>();   // per repo, so a request for one repo never cancels another's
 const prCache = new Map<string, PrState>();   // every repo seen, a list still loading included, so going back does not run az again
-function forgetPrs(path: string): void { prCache.delete(path); }   // a repo that is no longer open (prSeq stays: numbers must not repeat)
+const noPrs = (): PrState => ({ path: null, state: 'idle', items: [], repo: null, error: '', at: 0 });
+// A repo that is no longer open (prSeq stays: numbers must not repeat). Its list may
+// also be the live one: loadPrs would otherwise put it back in the cache on the next switch.
+function forgetPrs(path: string): void { prCache.delete(path); if (prs.path === path) prs = noPrs(); }
 const PR_EVERY = 5 * 60e3;   // pull requests change on the server; ask again this often
 /* minAge: skip if the list is newer than this. A sync (commit, fetch, a new
    remote URL) asks sooner than the timer, a manual refresh (force) always.
@@ -2203,7 +2210,7 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
     setData(commits, info.name, false, { remotes: st.remotes, refs: st.refs, hidden, solo, keep, ordered: true, more: page.more, capped: page.capped });
     S.bad = bad.length; S.forceFull = settled !== st.fingerprint; updateView();
     $('#repoBtn').title = info.path;
-    addRecent(info); lsSet('lanes.last', JSON.stringify(info));
+    addRecent(info);   // lanes.last is written by saveTabs, without lockKey
     hideError();
     loadTracking(); loadStashes(); loadPrs({ force: manual }); loadWip({ force: true });
   } catch (e) {
@@ -2211,7 +2218,8 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
     if (String(e) === BUSY) pendingLoad = { info, keep, manual };
     else {
       showError(String(e));
-      if (!current) showEmpty();
+      // The active tab asks for this repo now: never leave another repo's graph under it.
+      if (!current || current.path !== info.path) dropRepo();
     }
   } finally {
     if (seq === loadSeq) {
@@ -2222,20 +2230,46 @@ async function loadRepo(info: RepoInfo, { keep = false, manual = false }: { keep
   }
 }
 
-let openSeq = 0;   // the newest click wins here too: open_repo of an earlier click may answer late
-async function openPath(path: string, { quiet = false }: { quiet?: boolean } = {}){
-  const seq = ++openSeq;
+/* Nothing loaded: an empty tab, a tab whose repo failed to open, or no tab at
+   all. A load in flight is dropped (busy too, or polls would stop for good and
+   the same repo could never load again), and with current null nothing polls. */
+function dropRepo(){
+  loadSeq++; openSeq++;
+  busy = false; busyPath = null; document.body.classList.remove('loading');
+  current = null; fingerprintSeen = null;
+  if (prs.path) { prCache.set(prs.path, prs); prs = noPrs(); }
+  closeDiff(); wipSel = false;
+  S = { commits: [], idx: new Map(), edges: [], maxLane: 0, repo: '', sample: false, note: '' };
+  render(null, null);
+  detailFor = null; detail.innerHTML = '<div class="empty">Select a commit to see details</div>';
+  $('#repoName').textContent = '—'; $('#headName').textContent = '—'; $('#stats').textContent = '';
+  $('#repoBtn').title = ''; document.title = 'GitKrapao';
+  showEmpty();
+}
+
+/* Opening a repo (recent menu, Ctrl/⌘ O, the empty state) fills the active tab,
+   as GitKraken's repository menu does; with no tabs it makes one first. */
+let openSeq = 0;   // the newest open or tab switch wins: open_repo of an earlier click may answer late
+async function openPath(path: string){
+  closeMenu();
+  if (goToOpen(path)) return;
+  const tab = targetTab(), seq = ++openSeq;
+  let info: RepoInfo;
   try {
-    const info = await invoke('open_repo', { path });
-    if (seq !== openSeq) return;
-    closeMenu();
-    await loadRepo(info);
+    info = await invoke('open_repo', { path });
   } catch (e) {
-    if (seq !== openSeq) return;
+    if (seq !== openSeq || tabs.list[tabs.active] !== tab) return;
+    // The tab keeps the path asked for, named as the recent list had it, so it can be closed.
+    const r = recentList().find(x => x.path === path);
+    Object.assign(tab, { path, name: r ? r.name : baseName(path), info: undefined, sel: undefined });
+    saveTabs(tabs); renderTabs();
     forgetRecent(path);
-    if (!quiet) showError(String(e));
-    if (!current) showEmpty();
+    dropRepo();
+    showError(String(e));
+    return;
   }
+  if (seq !== openSeq || tabs.list[tabs.active] !== tab) return;
+  await openInTab(tab, info);
 }
 
 async function pickRepo(){
@@ -2243,8 +2277,127 @@ async function pickRepo(){
   try {
     const info = await invoke('pick_repo', {});
     if (!info) return;
-    await loadRepo(info);
+    openSeq++;   // a slow open_repo of an earlier click must not land on top of this
+    await openInTab(targetTab(), info);
   } catch (e) { showError(String(e)); }
+}
+
+/* ---------- repository tabs (desktop) ----------
+   One repo is loaded at a time, the active tab's; the others are only a
+   path and a name (plus, in memory, the last open_repo answer and the
+   selected commit). Switching drops the old repo's state and loads the new
+   one; background tabs never call the backend. */
+let tabs: Tabs = { list: [], active: -1 };   // read from lanes.tabs at boot
+const tabStrip = $('#tabStrip'), tabList = $('#tabList');
+const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
+
+function renderTabs(): void {
+  const focused = tabStrip.contains(document.activeElement);
+  tabStrip.innerHTML = tabs.list.map((t, i) => {
+    const on = i === tabs.active;
+    return `<div class="tab-item${on ? ' on' : ''}" role="presentation" data-tab="${i}">`
+      + `<button class="tab" role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" title="${esc(t.path || NEW_TAB)}">`
+      + `<span class="tab-ic">${ICON.repo}</span><span class="tab-name">${esc(t.name)}</span>`
+      + (t.err ? '<span class="tab-dot" title="The last fetch or switch failed"></span>' : '') + '</button>'
+      + `<button class="tab-x" tabindex="-1" aria-label="Close ${esc(t.name)}" title="Close tab (Ctrl+W)">${ICON.x}</button></div>`;
+  }).join('');
+  $('#tabMore').hidden = !tabs.list.length;
+  if (!tabs.list.length) closeTabList(); else if (!tabList.hidden) fillTabList();
+  if (focused) tabStrip.querySelector<HTMLElement>('[role="tab"][tabindex="0"]')?.focus();
+}
+function scrollTabIntoView(){ tabStrip.querySelector('.tab-item.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+
+// The selected commit of the tab being left, restored if it is loaded when the tab comes back.
+function rememberSel(t: Tab){ if (current && t.path === current.path) t.sel = S.commits[sel]?.hash; }
+
+async function activateTab(i: number): Promise<void>{
+  const t = tabs.list[i]; if (!t) return;
+  const out = tabs.list[tabs.active];
+  if (out === t) {
+    // Already active: only a tab whose repo failed to open (nothing loaded or loading) tries again.
+    scrollTabIntoView();
+    if (t.path && !current && !busy) await showTab(t);
+    return;
+  }
+  if (out) rememberSel(out);
+  tabs.active = i; t.err = false;
+  saveTabs(tabs); renderTabs();
+  await showTab(t);
+}
+
+/* Shows tab t, already the active one: an empty tab shows the empty state;
+   otherwise its repo loads, superseding any load in flight (loadRepo/loadSeq). */
+async function showTab(t: Tab){
+  scrollTabIntoView();
+  if (!t.path) { dropRepo(); return; }
+  if (t.info) { openSeq++; await loadRepo(t.info); }
+  else await openPath(t.path);   // fills t.info
+  // Only from rows already loaded: switching never pages further to find it.
+  const i = t.sel && tabs.list[tabs.active] === t && current && current.path === t.path ? S.idx.get(t.sel) : undefined;
+  if (i !== undefined) select(i, { scroll: true });
+}
+
+function newTab(): void {
+  const out = tabs.list[tabs.active];
+  if (out) rememberSel(out);
+  tabs.list.push({ path: null, name: NEW_TAB });
+  tabs.active = tabs.list.length - 1;
+  saveTabs(tabs); renderTabs(); scrollTabIntoView();
+  dropRepo();
+}
+
+/* Closing the active tab shows its right neighbour (else the left one); closing
+   another loads nothing; closing the last leaves the empty state. Recents stay. */
+function closeTab(i: number): void {
+  const t = tabs.list[i]; if (!t) return;
+  const was = i === tabs.active, next = afterClose(tabs, i);
+  tabs.list.splice(i, 1);
+  tabs.active = next;
+  if (t.path) forgetPrs(t.path);
+  saveTabs(tabs); renderTabs();
+  if (!was) return;
+  const n = tabs.list[next];
+  if (n) showTab(n); else dropRepo();
+}
+
+// The active tab, or a new one when there are none.
+function targetTab(): Tab {
+  const cur = tabs.list[tabs.active];
+  if (cur) return cur;
+  const t: Tab = { path: null, name: NEW_TAB };
+  tabs.list.push(t); tabs.active = tabs.list.length - 1;
+  saveTabs(tabs); renderTabs();
+  return t;
+}
+/* path is open in another tab: activate that one instead of opening it twice,
+   and drop the active tab if it was an empty New tab. */
+function goToOpen(path: string): boolean {
+  let j = indexOfPath(tabs, path);
+  if (j < 0 || j === tabs.active) return false;
+  const cur = tabs.list[tabs.active];
+  if (cur && !cur.path) { tabs.list.splice(tabs.active, 1); tabs.active = -1; j = indexOfPath(tabs, path); }
+  activateTab(j);
+  return true;
+}
+// open_repo / pick_repo answered: the tab takes the repo, unless it is open in
+// another tab (a folder inside a repo resolves to the repo's root).
+async function openInTab(tab: Tab, info: RepoInfo){
+  if (goToOpen(info.path)) return;
+  if (tab.path !== info.path) tab.sel = undefined;
+  Object.assign(tab, { path: info.path, name: info.name, info, err: false });
+  saveTabs(tabs); renderTabs();
+  await loadRepo(info);
+}
+
+function fillTabList(){
+  tabList.innerHTML = tabs.list.map((t, i) => `<button class="menu-item${i === tabs.active ? ' on' : ''}" data-tab="${i}" title="${esc(t.path || NEW_TAB)}">`
+    + `<span class="n">${esc(t.name)}</span>${t.path ? `<span class="p">${esc(t.path)}</span>` : ''}</button>`).join('');
+}
+function closeTabList(){ tabList.hidden = true; $('#tabMore').setAttribute('aria-expanded', 'false'); }
+function toggleTabList(){
+  if (!tabList.hidden) { closeTabList(); return; }
+  fillTabList();
+  tabList.hidden = false; $('#tabMore').setAttribute('aria-expanded', 'true');
 }
 
 /* Infinite scroll: append the next page of the current stream. A reload
@@ -2322,10 +2475,13 @@ async function syncRepo(){
 
 async function poll(){
   if (!current || busy || moreBusy || document.hidden || opHere()) return;
+  // Another tab may start loading while this waits (busy, current not switched yet):
+  // then nothing below may run for the repo being left.
+  const path = current.path, left = () => busy || !current || current.path !== path;
   try {
-    const fp = await invoke('repo_fingerprint', { path: current.path });
-    if (fp === null) return;   // a fetch or switch is changing the repo
-    if (fp !== fingerprintSeen) await syncRepo();
+    const fp = await invoke('repo_fingerprint', { path });
+    if (fp === null || left()) return;   // null: a fetch or switch is changing the repo
+    if (fp !== fingerprintSeen) { await syncRepo(); if (left()) return; }
     loadPrs();   // returns at once unless PR_EVERY has passed
     loadWip();   // likewise, unless its interval has passed
   } catch (e) { /* repo moved or deleted; the next manual action will report it */ }
@@ -2517,11 +2673,16 @@ document.addEventListener('keydown', e => {
     if ((mod && e.key.toLowerCase() === 'r') || e.key === 'F5') { e.preventDefault(); refresh(); return; }
     if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); runFetch(); return; }
     if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); pickRepo(); return; }
+    // Tabs. preventDefault keeps the WebView from acting on them itself.
+    if (mod && e.key.toLowerCase() === 't') { e.preventDefault(); newTab(); return; }
+    if (mod && e.key.toLowerCase() === 'w') { e.preventDefault(); if (tabs.active >= 0) closeTab(tabs.active); return; }
+    if (e.ctrlKey && e.key === 'Tab') { e.preventDefault(); const i = cycle(tabs, e.shiftKey ? -1 : 1); if (i >= 0) activateTab(i); return; }
+    if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) { e.preventDefault(); const i = nth(tabs, +e.key); if (i >= 0) activateTab(i); return; }
   }
   const modalOpen = !$('#modal').hidden;
   if (mod && e.key.toLowerCase() === 'b' && !modalOpen) { e.preventDefault(); showSide(); return; }
   if (e.key === 'Escape') {
-    if (modalOpen) closeModal(); else if (!menu.hidden) closeMenu();
+    if (modalOpen) closeModal(); else if (!menu.hidden) closeMenu(); else if (!tabList.hidden) closeTabList();
     else if (diffOpen()) closeDiff();
     else if (sideShown && narrowView()) showSide(false); else detail.classList.remove('open');
     return;
@@ -2545,7 +2706,10 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'End') { e.preventDefault(); select(n - 1, { scroll: true, open }); }
   else if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
 });
-document.addEventListener('click', e => { if (!menu.hidden && !(e.target as Element).closest('.repo-wrap')) closeMenu(); });
+document.addEventListener('click', e => {
+  if (!menu.hidden && !(e.target as Element).closest('.repo-wrap')) closeMenu();
+  if (!tabList.hidden && !(e.target as Element).closest('.tabs-more-wrap')) closeTabList();
+});
 if (NATIVE) {
   // The webview's own menu (Back, Refresh, Print…) does nothing useful here. Keep it only
   // in text boxes (paste) and while text is selected (copy).
@@ -2616,9 +2780,41 @@ if (NATIVE) {
   window.addEventListener('focus', () => loadWip({ force: true }));   // back from the editor
   document.addEventListener('visibilitychange', poll);
 
-  const last = lsJSON<RepoInfo | null>('lanes.last', null);
-  if (last && last.path) openPath(last.path, { quiet: true });
-  else showEmpty();
+  // Tab strip: a click activates, the x (or a middle click) closes; Left/Right move
+  // focus between tabs and Enter/Space (the button's own click) activates.
+  $('#tabs').hidden = false;
+  tabStrip.addEventListener('click', e => {
+    const t = e.target as Element, item = t.closest<HTMLElement>('.tab-item'); if (!item) return;
+    if (t.closest('.tab-x')) closeTab(+item.dataset.tab!); else activateTab(+item.dataset.tab!);   // data-tab: renderTabs
+  });
+  tabStrip.addEventListener('auxclick', e => {
+    const item = (e.target as Element).closest<HTMLElement>('.tab-item');
+    if (item && e.button === 1) { e.preventDefault(); closeTab(+item.dataset.tab!); }
+  });
+  tabStrip.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const all = [...tabStrip.querySelectorAll<HTMLElement>('[role="tab"]')];
+    const at = all.indexOf(document.activeElement as HTMLElement); if (at < 0) return;
+    e.preventDefault();
+    const next = all[(at + (e.key === 'ArrowRight' ? 1 : -1) + all.length) % all.length]!;   // all has at least the focused tab
+    all.forEach(b => { b.tabIndex = b === next ? 0 : -1; });
+    next.focus(); next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
+  // A mouse wheel scrolls an overflowing strip sideways.
+  tabStrip.addEventListener('wheel', e => { if (e.deltaY && !e.deltaX && tabStrip.scrollWidth > tabStrip.clientWidth) { e.preventDefault(); tabStrip.scrollLeft += e.deltaY; } }, { passive: false });
+  $('#tabNew').addEventListener('click', newTab);
+  $('#tabMore').addEventListener('click', toggleTabList);
+  tabList.addEventListener('click', e => {
+    const b = (e.target as Element).closest<HTMLElement>('[data-tab]'); if (!b) return;
+    closeTabList(); activateTab(+b.dataset.tab!);
+  });
+
+  // Saved tabs (or lanes.last from an older build); only the active one loads, and a
+  // repo that fails to open says so in the banner.
+  tabs = loadTabs();
+  saveTabs(tabs); renderTabs();
+  const first = tabs.list[tabs.active];
+  if (first) showTab(first); else showEmpty();
 } else {
   $('#repoBtn').classList.add('static');
   $('#repoBtn').removeAttribute('aria-haspopup');
